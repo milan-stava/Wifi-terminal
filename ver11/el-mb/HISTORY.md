@@ -1,83 +1,55 @@
-﻿# ELMB WiFi Terminal 1.1
+# WiFi Terminal 1.1 - EL/MB release notes
 
-6. 11. 2026. Společný zdroj pro samostatný terminál a součást setupu (IFDEF setup).
-Verze 1.0 je nedotčená.
+A shared main source builds the standalone terminal and the setup component using IFDEF setup. Version 1.0 remains unchanged in the historical archive.
 
-Editor nyní používá spodní kanál ROM (stream 1), fyzické řádky 22–23.
-Výpis UARTu používá horní kanál ROM (stream 2), řádky 0–21. Odpadá
-odrolování horního výpisu kvůli editoru. Přepnutí kanálů a tisk znaků zajišťuje
-ROM; zachovává se aktivní režim 32/64 znaků, font i bankovní obsluha patche.
+## Editor and display
 
-Výřez obsahuje 63/127 znaků plus pozici kurzoru. Dlouhý příkaz se posouvá
-s kurzorem, celý obsah zůstává v bufferu (nejvýše 256 znaků). Enter odešle
-celý příkaz, nikoli jen viditelný výřez nebo část před kurzorem. Na limitu
-se další znak nevloží a příkaz se sám neodešle. Kurzor je inverzní, 8/4 pixely.
+The editor uses ROM stream 1 on physical rows 22-23. UART output uses ROM stream 2 on rows 0-21. The ROM handles channel switching and character output, preserving the active 32/64-column mode, font, and patch banking.
 
-↑/↓ vybírá příkaz z historie přímo do editoru; lze jej dále upravovat.
-←/→ posouvá kurzor, DELETE maže předchozí znak, psaní vkládá znak.
-SS+W smaže celý rozepsaný příkaz bez odeslání a bez mazání historie.
-SS+E nastaví hostitelský UART na 115200; neodesílá změnu rychlosti do ESP.
-EDIT cykluje rychlosti. SS+Q žádá potvrzení DELETE COMMAND HISTORY? (Y/N).
-CS+SS obnoví nápovědu; SS+SPACE ukončí terminál. Ostatní původní funkce zůstávají.
+The viewport holds 63 or 127 characters plus the cursor. Long commands scroll with the cursor while the complete command remains in the buffer, up to 256 characters. Enter sends the complete command. At capacity, additional input is ignored; commands are never sent automatically. The inverse cursor is 8 or 4 pixels wide.
 
-Historie: #7000–#73FF (1 KB), záznamy WORD délka + text.
-Záloha dvou spodních obrazových řádků: #6C00–#6E3F (576 B).
-Stav editoru: #6E40–#6E4F. Start kódu: 30000. BASIC loader CLEAR 27647.
+- UP/DOWN: recall history directly into the editable command.
+- LEFT/RIGHT: move the cursor.
+- DELETE: remove the preceding character; typing inserts at the cursor.
+- SS+W: clear the current command without sending it or clearing history.
+- SS+E: set host UART to 115200; no baud-change command is sent to ESP.
+- EDIT: cycle UART speeds.
+- SS+Q: ask DELETE COMMAND HISTORY? Y/y confirms, N/n cancels, other letters are ignored. No Enter is required.
+- CS+SS: show help again.
+- SS+SPACE: return to BASIC with WiFi left on.
+- SS+ENTER: return to BASIC and request WiFi power-off.
 
-## Sestavení a velikosti
+Power-off works on MB. eLeMeNt cannot switch ESP power off, although the shared exit message still reports power-off. The setup component returns with WiFi on.
 
-Spusť source/assembly.bat. Výstupy se kopírují do runable/.
+## Memory and final outputs
 
-| Soubor | Bajtů |
+History uses 7000-73FF, 1 KB, with WORD length plus text records.
+The two-row screen backup uses 6C00-6E3F, 576 bytes; editor state uses 6E40-6E4F.
+Code starts at 30000. The BASIC loader uses CLEAR 27647.
+
+| File | Bytes |
 |---|---:|
 | Terminal11_el_mb.tap | 5411 |
 | terminal11_el_mb.bin | 5325 |
 | terminal11_el_mb_setup.bin | 5256 |
 
-Aktuální oprava odpovědi Y/N přidává 11 B proti TAPu 5351 B. Celkem o 10 B méně než TAP 5372 B. Předchozí vydání je
-zálohované v before-bottom-editor/. Všechny starší zálohy zůstávají.
-Dvě původní assemblerová varování u zpětného lomítka dávají stejný bajt #5C jako 1.0.
+Run assembly.bat in the package root. Outputs are copied to runable/.
+Two inherited assembler warnings truncate the backslash literal to the same byte 5C as version 1.0.
 
-## Ověření
+## Development history
 
-Základní vydání prošlo 2951 modelovými scénáři pro každou variantu: editace, historie, limity,
-Enter/EOT/CIPSEND, UART, nápověda, klávesové zkratky a návrat do BASICu.
-Model tisku rozlišuje horní a spodní kanál ROM.
+The lower-screen editor replaced a design that scrolled the output area when recalling commands. Subsequent fixes addressed cursor inversion, ROM 32/64-column handling, separators after baud changes, preservation of ATE0, and immediate Y/N confirmation.
 
-104 scénářů se skutečnými ROM instrukcemi v režimech 32/64 znaků:
-Busy ZXrom64m a m64a4 nainstalovaný původním instalátorem do modelu bank 0/10.
-Kontroluje se inverzní kurzor, dlouhé příkazy, oddělení horního výpisu,
-všech 24 rychlostí přes EDIT, opakovaný RX scroll a nápověda.
-M64 sada prošla také pro standalone. Samostatný test BSROM kontroluje
-všech 24 rychlostí, zarovnání oddělovačů a zachování ATE0 po příjmu.
-Bankování je simulované; reálný MB je potřeba ověřit. ROM a snapshot nejsou přibalené.
+Adding standalone exit shortcuts increased the then-current TAP from 5362 to 5407 bytes; moving only the second help column two characters right added another 4 bytes, producing the final 5411-byte TAP. The setup component remained 5256 bytes.
 
-Testy: tests/test_editor.ps1 (také -Standalone), tests/test_rom_baud.ps1,
-tests/test_rom_width.ps1 -RomPath cesta [-M64InstallerPath cesta] [-Standalone],
-tests/verify_release.ps1.
+An early setup integration measured 16113/16157/16157 bytes for standalone/flash/debug. These are historical figures, not the current WiFi Setup release sizes. Development backups remain outside this repository in the working archive.
 
-## Kontrolní integrace do setupu 1.8
+## Verification
 
-V oddělené pracovní kopii, bez změn rodičovského setupu:
+The current packaged setup component passed 2960 integrated editor scenarios in the assembled-code CPU model. Earlier development checks covered 2951 scenarios per variant, targeted Y/N and exit cases, and 104 real-ROM instruction scenarios for 32/64-column printing.
 
-| Raw výstup | Bajtů | Rezerva do 16384 |
-|---|---:|---:|
-| standalone | 16113 | 271 |
-| flash | 16157 | 227 |
-| flash debug | 16157 | 227 |
+ROM checks cover Busy ZXrom64m and m64a4 installation with modelled banks 0/10, inverse cursor rendering, long commands, output separation, baud cycling, repeated RX scrolling, and help. BSROM tests cover all 24 rates, separators, and ATE0 preservation after RX. Banking is simulated; physical testing is not exhaustive.
 
-Všechny sestavy splnily ASSERT total_len < 16384; 112 regresních scénářů setupu prošlo.
-Oprava Y/N: odpověď se ihned vytiskne za dotazem a odřádkuje, modalita se zruší bez Enteru. Aktuálně 54 cílených scénářů pro každou variantu, včetně Y/y/N/n a SS+SPACE, okamžité změny historie a následné editace. Jiné písmeno zůstává ignorované. Záloha před opravou: before-history-answer/.
+Tests: tests/test_editor.ps1, optionally -Standalone; tests/test_rom_baud.ps1; tests/test_rom_width.ps1 with -RomPath and optional -M64InstallerPath; tests/verify_release.ps1.
 
-## Volba Wi-Fi při ukončení samostatné varianty
-
-SS+SPACE vrátí do BASICu a ponechá Wi-Fi zapnutou: WiFi is ON.
-SS+ENTER vrátí do BASICu a vypne Wi-Fi: WiFi turned OFF. Bye.
-Bez potvrzovacího dotazu. SS+ENTER má kód 202, TRUE VIDEO nadále 3.
-Nápověda obsahuje obě zkratky. Ověřeno přímo přes čtení matice klávesnice.
-Nárůst proti TAPu 5362 B: 45 B, aktuální TAP 5407 B, standalone BIN 5321 B.
-Setupová varianta zůstává binárně shodná (5256 B); při návratu zachovává Wi-Fi ON.
-Cílené kontroly: 59 scénářů standalone, 58 setup; 104 ROM 32/64 scénářů standalone.
-Předchozí vydání: before-exit-choice/.
-
-V nápovědě SS+SPACE a SS+ENTER zůstává první sloupec vlevo; pouze druhý sloupec je posunut o dva znaky doprava (+4 B). Aktuální TAP 5411 B, standalone BIN 5325 B; setup BIN beze změny.
+ROM files, snapshots, and installers are not distributed.

@@ -1,103 +1,73 @@
-﻿# ZX Next WiFi Terminal 1.1
+# WiFi Terminal 1.1 - ZX Next release notes
 
-6. 11. 2026. Samostatná Next větev odvozená z finální EL/MB 1.1.
-Finální EL/MB zdroje a výstupy zůstávají nedotčené; kontrolní součty jsou v tests/elmb-final-manifest.json.
+The Next port is based on the final EL/MB 1.1 terminal. The EL/MB sources and binaries are maintained separately.
 
-## Výstupy
+## Outputs and startup
 
-- runable/Terminal11_next.tap: 5400 B, samostatný terminál s BASIC loaderem.
-- runable/terminal11_next_setup.bin: 5314 B, komponenta pro Next WiFi Setup 1.8.
-- source/terminal11_next.bin: 5314 B, samotný kód samostatné varianty.
+| File in runable/ | Bytes |
+|---|---:|
+| Terminal11_next.tap | 5400 |
+| terminal11_next.bin | 5314 |
+| terminal11_next_setup.bin | 5314 |
 
-Jeden hlavní zdroj source/terminal11_main.asm, dva obaly; IFDEF setup určuje
-variantu pro začlenění. Oba obaly definují ZXNEXT. Sestavení: source/assembly.bat,
-SjASMPlus 1.20.3. Dvě původní výstrahy u zpětného lomítka dávají bajt #5C jako EL/MB.
+One main source, source/terminal11_main.asm, is used by two wrappers. Both define ZXNEXT; IFDEF setup selects the embedded component. Run assembly.bat in the package root with SjASMPlus 1.20.3. Two inherited backslash-literal warnings still produce byte 5C.
 
-TAP spouštěj v 48 BASIC / USR 0 prostředí Nextu s běžným ULA displejem a dostupnými
-48K ROM rutinami. Není to .NEX ani nativní 64/80sloupcový režim NextBASICu.
-Loader: CLEAR 27647, LOAD CODE, RANDOMIZE USR 30000. Start kódu 30000.
-Historie #7000–#73FF (1 KB), backing editoru #6C00–#6E3F a stav #6E40–#6E4F.
-Volající setup zajišťuje odpovídající mapování RAM/ROM, zásobník pod scratch oblastí
-a dostupné ROM tiskové kanály. Po návratu jsou obnoveny IX/zásobník, přerušení jsou zapnutá.
+Start the TAP in 48 BASIC / USR 0 with the standard ULA display and available 48K ROM routines. It is not a .NEX file or a native NextBASIC 64/80-column application.
 
-## Hardware Nextu
+The loader uses CLEAR 27647, LOAD CODE, RANDOMIZE USR 30000.
+History uses 7000-73FF; editor backup uses 6C00-6E3F and state uses 6E40-6E4F.
+The calling setup must provide compatible RAM/ROM mapping, ROM streams, and a stack below the scratch area. IX and the stack are restored on return; interrupts are enabled.
 
-- Inicializace explicitně vybere ESP UART přes #153B (bit 6 = 0).
-- Rámec #163B = #18: 8N1, bez flow control, breaku a drženého UART resetu.
-- Rychlost používá dělič Nextu, nikoli indexový port MB #7D3B.
-- Tabulka 15 rychlostí × 8 časování: 2400 až 2000000 baud, výchozí 115200.
-  Pořadí zůstává 115200, 57600, 38400, 31250, 19200, 9600, 4800, 2400,
-  230400, 460800, 576000, 921600, 1152000, 1500000, 2000000.
-- NextReg #11 čte časování 0–7; dělič = zaokrouhlené Fsys / baud.
-  VGA: 28 / 28.571429 / 29.464286 / 30 / 31 / 32 / 33 MHz; HDMI: 27 MHz.
-  Nezávisí na aktuální rychlosti CPU. Vyšší přenosové rychlosti vyžadují ověření
-  na konkrétním ESP a Nextu; uvedená rychlost je nominální, dělič ji zaokrouhluje.
-- Každý zápis rychlosti vybere ESP a vynuluje horní 3 bity 17bitového děliče
-  zápisem #153B = #10, potom zapíše dolní a horní 7bitovou část do #143B.
-- RX: #133B bit 0. TX: #133B bit 1 = FIFO plné. Čtení dat: #143B, zápis: #133B.
-- Nepoužívají se řídicí porty MB/eLeMeNt #703B/#713B/#7D3B.
-- Není zde řízení napájení ESP. SS+SPACE ukončí terminál a ponechá Wi-Fi ON.
-  SS+ENTER nevypíná ESP a je ignorován; TRUE VIDEO má nadále vlastní funkci.
-- Nemění se CPU speed, MMU, režim displeje ani reset ESP/expansion busu.
-  Předpoklad: UART porty jsou povolené a ESP UART není přesměrovaný na joystick.
-  Za běhu terminálu nesmí jiný kód přepínat sdílený UART na Pi.
+## Next UART
 
-## Ovládání a obrazovka
+- Initialization selects ESP using port 153B, bit 6 cleared.
+- Port 163B is set to 18: 8N1, no flow control, break, or held UART reset.
+- Rates use Next prescalers, not MB indexed baud ports.
+- Fifteen rates across eight video timings cover 2400 through 2000000 baud; default is 115200.
+- EDIT order: 115200, 57600, 38400, 31250, 19200, 9600, 4800, 2400, 230400, 460800, 576000, 921600, 1152000, 1500000, 2000000.
+- NextReg 11 selects timing 0..7. Prescaler is rounded Fsys/baud. VGA clocks are 28, 28.571429, 29.464286, 30, 31, 32, and 33 MHz; HDMI is 27 MHz.
+- Each baud write selects ESP, clears the upper three 17-bit prescaler bits through 153B=10, and writes the lower/upper seven-bit parts through 143B.
+- Status RX-ready is bit 0 and TX-full is bit 1 of 133B. Read data at 143B; write data at 133B.
+- MB/eLeMeNt control ports 703B/713B/7D3B are not used.
 
-Info: ZX Next WiFi Terminal, ver 1.1; autorství 2020-26.
-Editor používá spodní ROM kanál na fyzických řádcích 22–23, UART horních 22 řádků.
-UP/DOWN vybírá historii přímo do editoru; LEFT/RIGHT pohyb, DELETE maže před kurzorem.
-Výřez dlouhého příkazu se posouvá, příkaz v bufferu zůstává celý (nejvýše 256 B).
-Enter odešle celý příkaz. Při dosažení limitu se znak ignoruje, nic se samo neodesílá.
-Inverzní kurzor a tisk zůstávají vedené ROM. Kompatibilita m64 ROM 32/64 je zachovaná;
-nejde o implementaci nativního NextBASIC tiskového režimu.
+Rates are nominal and independent of the current CPU speed. High-speed transfers require validation with the actual Next and ESP.
 
-SS+W vymaže příkaz. SS+Q vymaže historii po jediném stisku Y/y; N/n zruší,
-jiné písmeno se ignoruje. Y/N se ihned zobrazí a odřádkuje, bez Enteru.
-EDIT cykluje 15 rychlostí, SS+E nastaví hostitelský UART na 115200.
-CS+SS zobrazí nápovědu. CAPS LOCK, TRUE/INV VIDEO, CIPSEND a další funkce jsou zachované.
+There is no ESP power control. SS+SPACE exits with WiFi left on. SS+ENTER is ignored. CPU speed, MMU, display mode, ESP reset, and expansion-bus reset are not changed.
 
-## Ověření
+UART ports must be enabled and ESP must not be routed to joystick pins. Other code must not switch the shared UART to Pi while this terminal runs.
 
-- 2951 scénářů editoru/historie pro každou variantu; model ROM a UART.
-- 131 Next UART scénářů pro každou variantu: všech 120 rychlost/časování kombinací,
-  stale Pi selection / horní bity děliče, 8N1, cyklus EDIT, SS+E, RX a povolené porty.
-  Kontrolují i vytištěný číselný popis rychlosti po úsporném zabalení tabulky.
-- 86 scénářů se skutečnými instrukcemi Busy ROM a m64a4 32/64 pro obě varianty:
-  kurzor, editor, plný Enter, UART scrolling, help a změny rychlosti.
-- Samostatná kontrola skutečné BSROM: 15 rychlostí, oddělovače a ATE0 po RX.
-- TAP: struktura, checksumy, shoda CODE s BIN, loader a paměťové hranice.
+## Editing and shortcuts
 
-CPU/ROM testy nejsou testem fyzického Nextu ani plnou FPGA emulací.
-Zkušební ROM, RAM snapshot a m64 instalátor nejsou distribuované; cesty lze předat parametrům testů.
+The lower ROM stream provides the editor on rows 22-23; the upper 22 rows display UART output. UP/DOWN recalls history into the editor. LEFT/RIGHT moves the cursor, DELETE removes the preceding character, and typing inserts text.
 
-Příkazy:
+Long commands use a scrolling viewport; the complete command remains in the buffer, up to 256 bytes. Enter sends all of it. Additional characters at capacity are ignored without sending.
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/test_editor.ps1 [-Standalone]
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/test_uart_next.ps1 [-Standalone]
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/test_rom_baud.ps1 -RomPath cesta
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/test_rom_width.ps1 -RomPath cesta [-M64InstallerPath cesta] [-Standalone]
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/verify_release.ps1
+The inverse cursor and printing use ROM behavior, including compatible m64 32/64-column patches; native NextBASIC printing is not implemented.
 
-## Setup 1.8 a limit 16384
+SS+W clears the command. SS+Q clears history after Y/y; N/n cancels, other letters are ignored. Confirmation is immediate, without Enter.
+EDIT cycles rates; SS+E sets host UART to 115200. CS+SS shows help. Existing CAPS LOCK, TRUE/INV VIDEO, and CIPSEND functions are retained.
+The information screen identifies version 1.1 for ZX Next, copyright 2020-26.
 
-Tento balíček dodává hotovou terminálovou komponentu pro budoucí Next setup.
-Neobsahuje dosud kompletní port hardware backendu setupu; rodičovský setup ani
-referenční ZXNext/base_1.8 se nemění.
+## Verification
 
-Pouhá kontrola kapacity v oddělené kopii aktuálního setupu s BIOSem Next 2.1 (698 B)
-a tímto terminálem: raw standalone 16303 B, flash/debug 16347 B. Všechny ASSERT
-vyžadující velikost pod 16384 prošly; rezerva největší varianty je 37 B.
-Nejde o funkční Next vydání setupu: jeho zbývající MB hardware přístupy se musí teprve portovat.
+- 2951 modelled editor/history scenarios for the packaged setup component.
+- 131 Next UART scenarios per variant, including all 120 rate/timing combinations, stale Pi selection, upper prescaler bits, frame setup, EDIT, SS+E, RX, printed rates, and permitted ports.
+- Earlier checks executed 86 Busy/m64 ROM scenarios for both variants.
+- BSROM checks cover 15 rates, separators, and ATE0 preservation.
+- TAP verification checks blocks, checksums, CODE/BIN equality, loader, and memory layout.
 
-## Primární dokumentace
+Tests execute assembled Z80 code with modelled hardware; they are not exhaustive physical or FPGA testing. ROM files, snapshots, and the m64 installer are not distributed.
+
+Run tests/test_editor.ps1 or tests/test_uart_next.ps1, optionally with -Standalone.
+ROM tests accept -RomPath and, where needed, -M64InstallerPath.
+Run tests/verify_release.ps1 for package checks.
+
+## Integration and references
+
+The setup component is included in the separate WiFi Setup 1.8 Next release. Early development size experiments predated the complete setup port and should not be treated as current release measurements.
 
 - https://wiki.specnext.dev/UART_Control
 - https://wiki.specnext.dev/UART_Frame
 - https://wiki.specnext.dev/UART_RX
 - https://wiki.specnext.dev/UART_TX
 - https://gitlab.com/SpectrumNext/ZX_Spectrum_Next_FPGA/-/raw/master/cores/zxnext/nextreg.txt
-
-Frekvence VGA 0–6 a identifikace HDMI 7 vycházejí z NextReg #11; HDMI 27 MHz a
-prescaler mechanismus také z dokumentace UART RX. Tabulky odpovídají dříve prověřenému
-BIOSu Next 2.1; výpočty se v testu ověřují nezávisle podle frekvencí.
