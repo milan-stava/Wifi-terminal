@@ -1,0 +1,22 @@
+﻿[
+    {
+        "sha256":  "B5C24B52F82AD6D1CF4DE18A90A8BCACD23069D2A7F06A988003391AEBD1FF91",
+        "path":  "source\\terminal11_el_mb.asm"
+    },
+    {
+        "sha256":  "452EE7EAEB23F0FC506F6D5ADA17CC479E61CDF0D8261B6C72C736536B7A1EDF",
+        "path":  "source\\terminal11_el_mb.bin"
+    },
+    {
+        "sha256":  "8EC02DEA4ACDF0A48D10CB620AAF0324913421DC8F29186CD034B5421DAF4893",
+        "path":  "source\\terminal11_el_mb_setup.asm"
+    },
+    {
+        "sha256":  "E7F75C124D6358980B73F3F37253DF12C35C3F4B2756B6F1698AEC55055483AC",
+        "path":  "source\\terminal11_el_mb_setup.bin"
+    },
+    {
+        "sha256":  "F36460CBA6FC3A7CC46955C16F0B0034A8BA78CE208AB85D26C5100081C88600",
+        "path":  "source\\terminal11_main_el_mb.asm"
+    }
+]

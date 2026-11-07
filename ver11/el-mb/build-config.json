@@ -1,0 +1,24 @@
+﻿{
+    "outputs":  [
+                    {
+                        "sha256":  "13ED199712C18B9A36EF9D9FD3290B044986A70D03BAD6E9873457C9447E5664",
+                        "source":  "Terminal11_el_mb.tap",
+                        "file":  "Terminal11_el_mb.tap"
+                    },
+                    {
+                        "sha256":  "452EE7EAEB23F0FC506F6D5ADA17CC479E61CDF0D8261B6C72C736536B7A1EDF",
+                        "source":  "terminal11_el_mb.bin",
+                        "file":  "terminal11_el_mb.bin"
+                    },
+                    {
+                        "sha256":  "E7F75C124D6358980B73F3F37253DF12C35C3F4B2756B6F1698AEC55055483AC",
+                        "source":  "terminal11_el_mb_setup.bin",
+                        "file":  "terminal11_el_mb_setup.bin"
+                    }
+                ],
+    "directory":  "source",
+    "targets":  [
+                    "terminal11_el_mb",
+                    "terminal11_el_mb_setup"
+                ]
+}

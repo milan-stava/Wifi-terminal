@@ -1,0 +1,2757 @@
+# file opened: terminal11_next.asm
+   1  0000               DEVICE ZXSPECTRUM128
+   2  0000               DEFINE ZXNEXT
+   3  0000               MODULE v1
+   4  0000               INCLUDE "terminal11_main.asm"
+# file opened: terminal11_main.asm
+   1+ 0000              ; ZX Next 1.1: ESP UART/8N1, 15 rates x 8 timings; no MB ports or power-off.
+   2+ 0000              ; 06.11.2026: retain v1.0 ROM/BASIC output contract; m64 32/64 native UI.
+   3+ 0000              ; Bottom editor: ROM channel 1, physical rows 22/23; UART channel 2, rows 0..21.
+   4+ 0000              ; Cursor uses ROM OVER/INVERSE space; viewport is 63/127 chars plus cursor.
+   5+ 0000              ; SS+E returns the host UART to 115200 from every speed; draft/history preserved.
+   6+ 0000              ; SS+W clears the complete draft/cursor/history selection without transmitting.
+   7+ 0000              ; Existing packed command history remains intact.
+   8+ 0000              ; 06.11.2026: use native lower ROM channel; remove upper-screen row reservation.
+   9+ 0000              ; Remove obsolete SPACE/BS cursor erasure from EDIT and CIPSEND toggles.
+  10+ 0000              ; Scroll fix: initialise SCR_CT before startup/help strings, UI and each RX byte.
+  11+ 0000              ; ROM scroll? must never wait for an interrupt-driven key while terminal uses DI.
+  12+ 0000              ; Cursor fix: XOR glyph in place; moves update only two cells if window stays put.
+  13+ 0000              ; Sticky window. SS+Q asks DELETE COMMAND HISTORY? (Y/N); Y alone confirms.
+  14+ 0000              ; RX CR no longer wipes a cursor after ui_hide has restored the output position.
+  15+ 0000              ; Editor update: cursor/end separate, insertion/backspace, 63-char 2-row sliding view.
+  16+ 0000              ; LEFT=CS+5 (code 12), RIGHT=CS+8 (9), DELETE=CS+0 (8). Enter sends whole line.
+  17+ 0000              ; ui_backup #6C00..#6E3F: 576 B scratch backing the two editor screen rows.
+  18+ 0000              ; Standalone loader CLEAR 27647 protects scratch plus history #7000..#73FF.
+  19+ 0000              ; CS+SS redisplays help and current baud, preserving draft/history.
+  20+ 0000              ; Version 1.1: 1KB command history at #7000-#73FF; UP=older, DOWN=newer.
+  21+ 0000              ; Packed 16-bit length + text records. Empty Enter/EOT preserve records.
+  22+ 0000              ; Down past newest clears line. Long commands up to 256 bytes are supported.
+  23+ 0000              ; Standalone BASIC loader must CLEAR 28671 to reserve external history RAM.
+  24+ 0000              ; Version 1.1 - 05.11.2026: fix last-command recall after RX/scroll.
+  25+ 0000              ; Recall derives edit pointer from printed text, never restores old ROM screen vars.
+  26+ 0000              ; History stores text only (max 256 bytes); empty Enter and EOT preserve history.
+  27+ 0000              ; Bound full recalled input before storing another byte. EL/MB hardware unchanged.
+  28+ 0000
+  29+ 0000              ;	DEVICE  ZXSPECTRUM48
+  30+ 0000
+  31+ 0000              ;	DEFINE setup		;version for setup, does not turn wifi off at quit
+  32+ 0000              				;otherwise newly it is one version for el, mb, or el+mb
+  33+ 0000
+  34+ 0000              ;version 1.1.
+  35+ 0000              ;new: just one version. Incompatibility with MB cores 25.01.2025 and later removed.
+  36+ 0000              ;tyding the initial screen+ one starting version 1.1, in order to get rid of the mess which was in older versions
+  37+ 0000              ;some old parts of code relating to ZXNext removed. Now more space in code.
+  38+ 0000
+  39+ 0000
+  40+ 0000 ~            /* old
+  41+ 0000 ~            ;	DEFINE mb03plus_setup	;version for MB03+ and wifi setup
+  42+ 0000 ~            	DEFINE eLeMeNtZX	;version for eLeMeNt ZX
+  43+ 0000 ~            ;	DEFINE mb03plus_setup	;version for MB03+ wifi setup
+  44+ 0000 ~            ;	DEFINE eLeMeNtZX_setup	;version for eLeMeNt ZX for wifi setup.... nonsence can be removed
+  45+ 0000 ~            */
+  46+ 0000
+  47+ 0000              ;	IFDEF setup
+  48+ 0000              ;	output el_mb_terminal10_setup.bin
+  49+ 0000              ;	ELSE
+  50+ 0000              ;	output el_mb_terminal10.bin
+  51+ 0000              ;	ENDIF
+  52+ 0000
+  53+ 0000
+  54+ 0000              g_ZXi_port0	equ #7C3B
+  55+ 0000              g_ZXi_port1	equ #7D3B
+  56+ 0000              ; TBBlue / ZX Spectrum Next project
+  57+ 0000              ; Copyright (c) 2010-2018
+  58+ 0000              ;
+  59+ 0000              ; UART - Tim Gilberts, Victor Trucco and Jim Bagley
+  60+ 0000              ;
+  61+ 0000              ; All rights reserved
+  62+ 0000              ;
+  63+ 0000              ; Redistribution and use in source and synthezised forms, with or without
+  64+ 0000              ; modification, are permitted provided that the following conditions are met:
+  65+ 0000              ;
+  66+ 0000              ; Redistributions of source code must retain the above copyright notice,
+  67+ 0000              ; this list of conditions and the following disclaimer.
+  68+ 0000              ;
+  69+ 0000              ; Redistributions in synthesized form must reproduce the above copyright
+  70+ 0000              ; notice, this list of conditions and the following disclaimer in the
+  71+ 0000              ; documentation and/or other materials provided with the distribution.
+  72+ 0000              ;
+  73+ 0000              ; Neither the name of the author nor the names of other contributors may
+  74+ 0000              ; be used to endorse or promote products derived from this software without
+  75+ 0000              ; specific prior written permission.
+  76+ 0000              ;
+  77+ 0000              ; THIS CODE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  78+ 0000              ; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+  79+ 0000              ; THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+  80+ 0000              ; PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
+  81+ 0000              ; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  82+ 0000              ; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  83+ 0000              ; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  84+ 0000              ; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  85+ 0000              ; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  86+ 0000              ; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  87+ 0000              ; POSSIBILITY OF SUCH DAMAGE.
+  88+ 0000              ;
+  89+ 0000              ; You are responsible for any legal issues arising from your use of this code.
+  90+ 0000              ;
+  91+ 0000              ;-------------------------------------------------------------------------------
+  92+ 0000              ;
+  93+ 0000              ; Victor also credits Jim Bagley with help with the Key scancode elsewhere.
+  94+ 0000              ;
+  95+ 0000              ; Adapted to z80asm for Z88DK, bug fixes, baud rate change and adapted to UART buffering status by Tim Gilberts
+  96+ 0000              ;
+  97+ 0000              ; See also excellent documentation by Allen Albright:
+  98+ 0000              ; https://github.com/z88dk/z88dk/blob/master/libsrc/_DEVELOPMENT/target/zxn/config/config_zxn_uart.m4
+  99+ 0000              ;
+ 100+ 0000              ;Version 2.1
+ 101+ 0000              ;Version 2.2 adding CIPSEND/IPD and some ANSI support etc
+ 102+ 0000              ;2.2 a minor patch aborted speed tester for prescaler
+ 103+ 0000              ;2.2 b change to use dual write to BAUD RATE for full scalar access and correct credits.
+ 104+ 0000              ;2.2 c correct available speeds to match some of the minicom ones on a Linux box
+ 105+ 0000              ;2.2 d added ability to send EOT (to support 4G modem card)
+ 106+ 0000              ;2.2 e added find ESP mode that tries all PreScaler values
+ 107+ 0000
+ 108+ 0000
+ 109+ 0000              ;Hood's version 0.1 based on Tim's 2.2e and his kind approval
+ 110+ 0000              ;news:	- can send bytes as numbers in CIPSEND mode (de/activated by INV.VIDEO)
+ 111+ 0000              ;	- arrow up invokes the last command
+ 112+ 0000              ;	- keyboard routine replaced (better routine+ no char print slow down)
+ 113+ 0000              ;Hood's version 0.12 (based of 22f)
+ 114+ 0000              ;0.3= separate versions for eLeMeNtZX and MB03+
+ 115+ 0000              ; - new speed modes
+ 116+ 0000              ;ver 1.0- new name, new version, one for all configuration, el, mb, el+mb
+ 117+ 0000
+ 118+ 0000              ;Org in memory for test and debug
+ 119+ 0000              	org 30000		;7530h
+ 120+ 7530              start_address
+ 121+ 7530              uart
+ 122+ 7530              maincode
+ 123+ 7530              ramcode
+ 124+ 7530
+ 125+ 7530              ;	DEFC	TX_CHKREADY = 4923	;133Bh Write is byte to send, when read is status 0x01 = RX_AVAIL or 0x02 - TX_READY
+ 126+ 7530              TX_CHKREADY	equ 4923
+ 127+ 7530              ;	DEFC	RX_SETBAUD = 5179	;143Bh Read is byte received, when written sets the BAUD rate. (now two bytes of prescaler TBU >.28)
+ 128+ 7530              RX_SETBAUD	equ 5179
+ 129+ 7530              ;To set BAUD prescaler first write must be 0-127 which are the lowest 7 bits (the 0 in BIT 7 resets the value loader).  Second byte must
+ 130+ 7530              ;be 1mmmmmml where l is the 8th bit of the prescaler and mmmmmm is the top six bits of the prescaler value (1 just stops the reset)
+ 131+ 7530
+ 132+ 7530              ;These are known in Z88DK as:
+ 133+ 7530
+ 134+ 7530              ;	DEFC __IO_UART_BAUD_RATE = 0x143b
+ 135+ 7530
+ 136+ 7530              ;Note old defs from Z88DK repurposed for default timing constants at VGA.
+ 137+ 7530              ;
+ 138+ 7530              ;	DEFC __IUBR_115200 = 243
+ 139+ 7530              ;	DEFC __IUBR_57600 = 486
+ 140+ 7530              ;	DEFC __IUBR_38400 = 729
+ 141+ 7530              ;	DEFC __IUBR_31250 = 896
+ 142+ 7530              ;	DEFC __IUBR_19200 = 1458
+ 143+ 7530              ;	DEFC __IUBR_9600 = 2916
+ 144+ 7530              ;	DEFC __IUBR_4800 = 5833
+ 145+ 7530              ;	DEFC __IUBR_2400 = 11666
+ 146+ 7530
+ 147+ 7530              ;The undocumented Next register 0x11 (17) can be used. I.e. OUT 9275,17 followed by IN 9531 (OUT 0x243B,0x11 IN 0x253B)
+ 148+ 7530              ;Victor used it to change the PLL
+ 149+ 7530              ;when X"11" => -- 17
+ 150+ 7530              ;		register_data_s 	<= "00000" & machine_video_timing;
+ 151+ 7530
+ 152+ 7530              start1:
+ 153+ 7530 F3           			DI
+ 154+ 7531 CD A6 7C     		call openscreen		;needs to be called, Tim has forgotten
+ 155+ 7534
+ 156+ 7534                      IFDEF ZXNEXT
+ 157+ 7534 CD B4 75                             call next_uart_init
+ 158+ 7537                      ELSE
+ 159+ 7537 ~            		ld bc,#703B		;turn Wifi module on alway. It is either MB wifi, which needs to turn on wifi, or el wifi, which is turned on automatically
+ 160+ 7537 ~            		ld a,5
+ 161+ 7537 ~            		out (c),a
+ 162+ 7537 ~            		inc b
+ 163+ 7537 ~            		in a,(c)
+ 164+ 7537 ~            		or 1
+ 165+ 7537 ~            		out (c),a		;Wifi ON
+ 166+ 7537                      ENDIF
+ 167+ 7537              ;		ld a,2
+ 168+ 7537              ;		out (254),a
+ 169+ 7537
+ 170+ 7537              ;		ld hl,turningon
+ 171+ 7537              ;		call print
+ 172+ 7537
+ 173+ 7537              ;		ld a,(23624)		;return border colour
+ 174+ 7537              ;		out (254),a
+ 175+ 7537
+ 176+ 7537              ;		ld hl,OK
+ 177+ 7537              ;		call print
+ 178+ 7537
+ 179+ 7537
+ 180+ 7537              ;		jr cont
+ 181+ 7537
+ 182+ 7537
+ 183+ 7537
+ 184+ 7537 DD E5        cont			PUSH IX
+ 185+ 7539
+ 186+ 7539 DD 21 BC 89  			LD IX,FLAGS
+ 187+ 753D DD 36 00 00  			LD (IX),%00000000
+ 188+ 7541 21 00 70     			ld hl,Buffer4
+ 189+ 7544 36 00        			ld (hl),0
+ 190+ 7546 23           			inc hl
+ 191+ 7547 36 00        			ld (hl),0
+ 192+ 7549 21 00 00     			ld hl,0
+ 193+ 754C 22 85 77     			ld (history_pos),hl		;Default is not to echo CIPSEND command data at the moment.
+ 194+ 754F
+ 195+ 754F ~            /* ZX Next related, not needed
+ 196+ 754F ~            			ld a,h
+ 197+ 754F ~            			or l
+ 198+ 754F ~            			JR z,normal_start  ;if we dont have parameters it is a read command
+ 199+ 754F ~
+ 200+ 754F ~            			LD A,(HL)
+ 201+ 754F ~
+ 202+ 754F ~            			CP '-'		;options flag - ignore any other junk
+ 203+ 754F ~            			JR NZ,normal_start
+ 204+ 754F ~
+ 205+ 754F ~            			INC HL
+ 206+ 754F ~            			LD A,(HL)
+ 207+ 754F ~            			CP 'f'		;
+ 208+ 754F ~            			JR NZ,normal_start
+ 209+ 754F ~            */
+ 210+ 754F
+ 211+ 754F
+ 212+ 754F ~            /*Hood, thios waiting loop seems useless
+ 213+ 754F ~            ;MB03 code start
+ 214+ 754F ~            		ld b,3
+ 215+ 754F ~            wftime1		ld de,0			;Wifi Timeout
+ 216+ 754F ~            wftime0		dec de
+ 217+ 754F ~            		ld a,d
+ 218+ 754F ~            		or e
+ 219+ 754F ~            		jr nz,wftime0
+ 220+ 754F ~            		djnz wftime1
+ 221+ 754F ~            ;		ld b,#13
+ 222+ 754F ~            ;wifibusy0	in a,(c)
+ 223+ 754F ~            ;		bit 0,a
+ 224+ 754F ~            ;		jr z,wifibusy0
+ 225+ 754F ~            ;MB03 code end
+ 226+ 754F ~            */
+ 227+ 754F
+ 228+ 754F              //LMN			JP find_esp
+ 229+ 754F
+ 230+ 754F              normal_start:
+ 231+ 754F 21 04 7E     			LD HL,Welcome
+ 232+ 7552 CD CC 7C     			CALL print
+ 233+ 7555
+ 234+ 7555 21 A9 7F     			ld hl,wifion
+ 235+ 7558 CD CC 7C     			call print
+ 236+ 755B
+ 237+ 755B              			; clear the buffer area
+ 238+ 755B 21 B7 83     			ld hl, Buffer1
+ 239+ 755E E5           			PUSH HL ;save the initial buffer position
+ 240+ 755F
+ 241+ 755F 36 00        			ld ( HL ),0
+ 242+ 7561 11 B8 83     			ld de, Buffer1 + 1
+ 243+ 7564 01 02 01     			ld bc, Endbuffers - Buffer1
+ 244+ 7567 ED B0        			ldir
+ 245+ 7569 CD FA 81     			call editor_reset
+ 246+ 756C AF           			xor a
+ 247+ 756D 32 4A 6E     			ld (ui_visible),a
+ 248+ 7570 32 4D 6E     			ld (history_confirm),a
+ 249+ 7573 AF           set_baud_115200:	XOR A
+ 250+ 7574
+ 251+ 7574                      IFDEF ZXNEXT
+ 252+ 7574 32 B5 83     set_baud_rate           ld (CURBAUD),a
+ 253+ 7577 6F                                  ld l,a
+ 254+ 7578 26 00                               ld h,0
+ 255+ 757A 29                                  add hl,hl
+ 256+ 757B 29                                  add hl,hl
+ 257+ 757C 29                                  add hl,hl
+ 258+ 757D 29                                  add hl,hl
+ 259+ 757E 11 B6 7F                            ld de,NextBaudPrescale
+ 260+ 7581 19                                  add hl,de
+ 261+ 7582 01 3B 24                            ld bc,#243B
+ 262+ 7585 3E 11                               ld a,17
+ 263+ 7587 ED 79                               out (c),a
+ 264+ 7589 04                                  inc b
+ 265+ 758A ED 78                               in a,(c)
+ 266+ 758C E6 07                               and 7
+ 267+ 758E 87                                  add a,a
+ 268+ 758F 5F                                  ld e,a
+ 269+ 7590 16 00                               ld d,0
+ 270+ 7592 19                                  add hl,de
+ 271+ 7593 5E                                  ld e,(hl)
+ 272+ 7594 23                                  inc hl
+ 273+ 7595 56                                  ld d,(hl)
+ 274+ 7596 EB                                  ex de,hl
+ 275+ 7597 01 3B 15                            ld bc,#153B
+ 276+ 759A 3E 10                               ld a,#10         ; ESP selected, upper divisor bits = 0
+ 277+ 759C ED 79                               out (c),a
+ 278+ 759E 01 3B 14                            ld bc,#143B
+ 279+ 75A1 7D                                  ld a,l
+ 280+ 75A2 E6 7F                               and 127
+ 281+ 75A4 ED 79                               out (c),a
+ 282+ 75A6 7C                                  ld a,h
+ 283+ 75A7 CB 15                               rl l
+ 284+ 75A9 17                                  rla
+ 285+ 75AA F6 80                               or 128
+ 286+ 75AC ED 79                               out (c),a
+ 287+ 75AE CD 48 7C                            call print_baud
+ 288+ 75B1 C3 C0 75                            jp read_key
+ 289+ 75B4 01 3B 15     next_uart_init         ld bc,#153B
+ 290+ 75B7 AF                                  xor a            ; select ESP, leave divider unchanged
+ 291+ 75B8 ED 79                               out (c),a
+ 292+ 75BA 04                                  inc b
+ 293+ 75BB 3E 18                               ld a,#18         ; 8N1, no break/flow control/reset
+ 294+ 75BD ED 79                               out (c),a
+ 295+ 75BF C9                                  ret
+ 296+ 75C0                      ELSE
+ 297+ 75C0 ~            set_baud_rate:		LD (CURBAUD),A
+ 298+ 75C0 ~
+ 299+ 75C0 ~            ;Now we calculate the prescaler value to set for our VGA timing.
+ 300+ 75C0 ~            /* Hood, ZX Next related, not needed
+ 301+ 75C0 ~            			PUSH AF
+ 302+ 75C0 ~
+ 303+ 75C0 ~            			LD HL,Timing
+ 304+ 75C0 ~            //			call print
+ 305+ 75C0 ~
+ 306+ 75C0 ~            			POP AF
+ 307+ 75C0 ~
+ 308+ 75C0 ~            			LD D,0
+ 309+ 75C0 ~            			SLA A		; *2
+ 310+ 75C0 ~            			RL D
+ 311+ 75C0 ~            			SLA A		; *4
+ 312+ 75C0 ~            			RL D
+ 313+ 75C0 ~            			SLA A		; *8
+ 314+ 75C0 ~            			RL D
+ 315+ 75C0 ~            			SLA A		; *16
+ 316+ 75C0 ~            			RL D
+ 317+ 75C0 ~            			LD E,A
+ 318+ 75C0 ~            			LD HL,BaudPrescale	; HL now points at the BAUD to use.
+ 319+ 75C0 ~            			ADD HL,DE
+ 320+ 75C0 ~
+ 321+ 75C0 ~            			LD BC,9275	;Now adjust for the set Video timing.
+ 322+ 75C0 ~            			LD A,17
+ 323+ 75C0 ~            			OUT (C),A
+ 324+ 75C0 ~            			LD BC,9531
+ 325+ 75C0 ~            			IN A,(C)	;get timing adjustment
+ 326+ 75C0 ~            			LD E,A
+ 327+ 75C0 ~            			RLC E		;*2 guaranteed as <127
+ 328+ 75C0 ~            			LD D,0
+ 329+ 75C0 ~            			ADD HL,DE
+ 330+ 75C0 ~
+ 331+ 75C0 ~            			LD E,(HL)
+ 332+ 75C0 ~            			INC HL
+ 333+ 75C0 ~            			LD D,(HL)
+ 334+ 75C0 ~            			EX DE,HL
+ 335+ 75C0 ~
+ 336+ 75C0 ~            			PUSH HL		; This is prescaler
+ 337+ 75C0 ~            			PUSH AF		; and value
+ 338+ 75C0 ~
+ 339+ 75C0 ~
+ 340+ 75C0 ~            			LD BC,RX_SETBAUD
+ 341+ 75C0 ~            			LD A,L
+ 342+ 75C0 ~            			AND %01111111	; Res BIT 7 to request write to lower 7 bits
+ 343+ 75C0 ~            //LMN			OUT (C),A
+ 344+ 75C0 ~            			LD A,H
+ 345+ 75C0 ~            			RL L		; Bit 7 in Carry
+ 346+ 75C0 ~            			RLA		; Now in Bit 0
+ 347+ 75C0 ~            			OR %10000000	; Set MSB to request write to upper 7 bits
+ 348+ 75C0 ~
+ 349+ 75C0 ~
+ 350+ 75C0 ~
+ 351+ 75C0 ~            			POP AF
+ 352+ 75C0 ~            			LD L,A
+ 353+ 75C0 ~            			LD H,0
+ 354+ 75C0 ~            //LMN			CALL prt_dec
+ 355+ 75C0 ~
+ 356+ 75C0 ~            			LD HL,Prescaler
+ 357+ 75C0 ~            //LMN			CALL print
+ 358+ 75C0 ~
+ 359+ 75C0 ~            			pop hl
+ 360+ 75C0 ~            //LMN			call prt_dec
+ 361+ 75C0 ~            */
+ 362+ 75C0 ~
+ 363+ 75C0 ~            			ld bc,RX_SETBAUD
+ 364+ 75C0 ~            			LD a, (CURBAUD) //LMN
+ 365+ 75C0 ~            			OUT (C),A
+ 366+ 75C0 ~            ;MB03 end
+ 367+ 75C0 ~            			call print_baud
+ 368+ 75C0 ~
+ 369+ 75C0                      ENDIF
+ 370+ 75C0 3E FF        read_key:               ld a,255
+ 371+ 75C2 32 8C 5C                             ld (23692),a
+ 372+ 75C5 CD DB 82                             call ui_show
+ 373+ 75C8
+ 374+ 75C8 AF           read_key_nc:		xor a	;MB03, to speed up print of characters if no key pressed
+ 375+ 75C9 DB FE        			in a,(254)
+ 376+ 75CB 2F           			cpl
+ 377+ 75CC E6 1F        			and 31
+ 378+ 75CE CA 20 79     			jp z,read_rx	;no key pressed,do not call slow keyboard routine
+ 379+ 75D1
+ 380+ 75D1 CD E9 7A     			call scankeys
+ 381+ 75D4
+ 382+ 75D4 FE 00        			cp 00
+ 383+ 75D6 CA 20 79     			JP z, read_rx ; jump to read RX if we dont have keys to send
+ 384+ 75D9
+ 385+ 75D9 47           check_history_confirm   ld b,a
+ 386+ 75DA 3A 4D 6E                             ld a,(history_confirm)
+ 387+ 75DD B7                                   or a
+ 388+ 75DE 78                                   ld a,b
+ 389+ 75DF 28 2D                                jr z,check_history_clear
+ 390+ 75E1 E6 DF                                and #DF
+ 391+ 75E3 FE 59                                cp 'Y'
+ 392+ 75E5 28 0B                                jr z,history_delete_yes
+ 393+ 75E7 FE 4E                                cp 'N'
+ 394+ 75E9 28 10                                jr z,history_delete_cancel
+ 395+ 75EB FE 06                                cp 6
+ 396+ 75ED 28 0C                                jr z,history_delete_cancel
+ 397+ 75EF C3 C8 75                             jp read_key_nc
+ 398+ 75F2 21 00 00     history_delete_yes      ld hl,0
+ 399+ 75F5 22 00 70                             ld (Buffer4),hl
+ 400+ 75F8 22 85 77                             ld (history_pos),hl
+ 401+ 75FB              ; Acknowledge Y/N immediately on the output channel; no Enter/readline.
+ 402+ 75FB CD B6 82     history_delete_cancel   call ui_hide
+ 403+ 75FE 78                                   ld a,b
+ 404+ 75FF FE 06                                cp 6
+ 405+ 7601 28 01                                jr z,history_answer_done
+ 406+ 7603 D7                                   rst 16
+ 407+ 7604 CD DF 7C     history_answer_done    call print_newline
+ 408+ 7607 AF                                   xor a
+ 409+ 7608 32 4D 6E                             ld (history_confirm),a
+ 410+ 760B C3 C0 75                             jp read_key
+ 411+ 760E FE C7        check_history_clear     cp 199
+ 412+ 7610 20 32                                jr nz,check_command_clear
+ 413+ 7612 3E 01                                ld a,1
+ 414+ 7614 32 4D 6E                             ld (history_confirm),a
+ 415+ 7617 CD B6 82                             call ui_hide
+ 416+ 761A CD DF 7C                             call print_newline
+ 417+ 761D 21 26 76                             ld hl,history_question
+ 418+ 7620 CD CC 7C                             call print
+ 419+ 7623 C3 C0 75                             jp read_key
+ 420+ 7626 44 45 4C 45  history_question        db "DELETE COMMAND HISTORY? (Y/N)",0
+ 420+ 762A 54 45 20 43
+ 420+ 762E 4F 4D 4D 41
+ 420+ 7632 4E 44 20 48
+ 420+ 7636 49 53 54 4F
+ 420+ 763A 52 59 3F 20
+ 420+ 763E 28 59 2F 4E
+ 420+ 7642 29 00
+ 421+ 7644 FE C8        check_command_clear     cp 200            ; SS+W: clear draft, keep history
+ 422+ 7646 CA 79 77                             jp z,history_blank
+ 423+ 7649 FE C9        check_baud_default      cp 201            ; SS+E: host UART 115200
+ 424+ 764B 20 06                                jr nz,check_help
+ 425+ 764D CD B6 82                             call ui_hide
+ 426+ 7650 C3 73 75                             jp set_baud_115200
+ 427+ 7653 FE 0E        check_help              cp 14             ; Caps Shift + Symbol Shift (EXT MODE)
+ 428+ 7655 20 16                                jr nz,check_exit
+ 429+ 7657 CD B6 82     help_screen             call ui_hide
+ 430+ 765A DD E5                                push ix
+ 431+ 765C CD A6 7C                             call openscreen
+ 432+ 765F DD E1                                pop ix
+ 433+ 7661 21 04 7E                             ld hl,Welcome
+ 434+ 7664 CD CC 7C                             call print
+ 435+ 7667 CD 48 7C                             call print_baud
+ 436+ 766A C3 C0 75                             jp read_key
+ 437+ 766D              check_exit
+ 438+ 766D FE 06                                cp 6
+ 439+ 766F CA FD 79                             jp z,finish
+ 440+ 7672
+ 441+ 7672 FE 03        			CP 3		;TRUE VIDEO - toggle diags on and off
+ 442+ 7674 20 0B        			JR NZ,not_toggle_diags
+ 443+ 7676
+ 444+ 7676 DD 7E 00     			LD A,(IX+0)
+ 445+ 7679 EE 40        			XOR %01000000
+ 446+ 767B DD 77 00     			LD (IX+0),A
+ 447+ 767E C3 C8 75     			JP read_key_nc
+ 448+ 7681
+ 449+ 7681              not_toggle_diags:
+ 450+ 7681 FE 02        			CP 2		; Toggle CAPS LOCK on and OFF (Not shift lock)
+ 451+ 7683 20 0B        			JR NZ, check_baud_change
+ 452+ 7685
+ 453+ 7685 3A 9E 77     			LD A,(CapsLock+1)
+ 454+ 7688 EE 20        			XOR %00100000
+ 455+ 768A 32 9E 77     			LD (CapsLock+1),A
+ 456+ 768D
+ 457+ 768D C3 C8 75     			JP read_key_nc
+ 458+ 7690
+ 459+ 7690 FE 07        check_baud_change:	CP 7; was 1	MB03	; Request to cycle BAUD rate with EDIT key
+ 460+ 7692 20 0F        			JR NZ, no_baud_change
+ 461+ 7694
+ 462+ 7694 CD B6 82     			call ui_hide
+ 463+ 7697
+ 464+ 7697
+ 465+ 7697 3A B5 83     			LD A,(CURBAUD)
+ 466+ 769A 3C           			INC A
+ 467+ 769B              			//LMN CP 15
+ 468+ 769B              			IFDEF ZXNEXT
+ 469+ 769B FE 0F                                CP 15
+ 470+ 769D                                      ELSE
+ 471+ 769D ~                                    CP 24
+ 472+ 769D                                      ENDIF
+ 473+ 769D CA 73 75     			JP Z,set_baud_115200
+ 474+ 76A0 C3 74 75     			JP set_baud_rate
+ 475+ 76A3
+ 476+ 76A3              no_baud_change:
+ 477+ 76A3 FE 04        			CP 4		;Want CIPSEND mode on/off
+ 478+ 76A5 20 2C        			JR NZ,not_set_cipsend
+ 479+ 76A7
+ 480+ 76A7 DD 7E 00     			LD A,(IX+0)
+ 481+ 76AA EE 01        			XOR %00000001
+ 482+ 76AC DD 77 00     			LD (IX+0),A
+ 483+ 76AF
+ 484+ 76AF CD B6 82     			call ui_hide
+ 485+ 76B2
+ 486+ 76B2
+ 487+ 76B2 CD DF 7C     			CALL print_newline
+ 488+ 76B5 21 8E 81     			LD HL,CIPOFF
+ 489+ 76B8 DD CB 00 46  			BIT 0,(IX+0)
+ 490+ 76BC 28 09        			JR Z,cipsend_state
+ 491+ 76BE
+ 492+ 76BE 21 BD 81     			LD HL,ATE0	;Make sure local ECHO is OFF
+ 493+ 76C1 CD 13 7A     			CALL tx_out
+ 494+ 76C4
+ 495+ 76C4 21 76 81     			LD HL,CIPON
+ 496+ 76C7              cipsend_state:
+ 497+ 76C7 CD CC 7C     			call print
+ 498+ 76CA 21 EB 7D     			LD HL, str_separator
+ 499+ 76CD CD CC 7C     			CALL print
+ 500+ 76D0 C3 C0 75     			JP read_key
+ 501+ 76D3
+ 502+ 76D3              not_set_cipsend:
+ 503+ 76D3 FE 05        			CP 5
+ 504+ 76D5 20 07        			JR NZ,not_set_ansi
+ 505+ 76D7 3E 1A        			LD A,26			;Send EOT used for 3g Modem
+ 506+ 76D9 C3 AF 77     			JP emit_EOT		;also does a flush of buffer
+ 507+ 76DC
+ 508+ 76DC              ;			JR not_set_ansi		;***TODO dropped support in 2.2
+ 509+ 76DC
+ 510+ 76DC              ;			CP 5		;Want ANSI mode on/off
+ 511+ 76DC              ;			JR NZ,not_set_ansi
+ 512+ 76DC
+ 513+ 76DC              ;			LD A,(IX+0)
+ 514+ 76DC              ;			XOR %00000010
+ 515+ 76DC              ;			LD (IX+0),A
+ 516+ 76DC
+ 517+ 76DC              ;			call ui_hide
+ 518+ 76DC 3E 20        			LD A,' '	;Wipe our cursor
+ 519+ 76DE              ;			RST 16
+ 520+ 76DE              ;			LD A,8
+ 521+ 76DE              ;			RST 16		;to move print position back as change will do a newline
+ 522+ 76DE
+ 523+ 76DE              ;			CALL print_newline
+ 524+ 76DE              ;			LD HL,ANSIOFF
+ 525+ 76DE              ;			BIT 1,(IX+0)
+ 526+ 76DE              ;			JR Z,ansi_state
+ 527+ 76DE              ;			LD HL,ANSION
+ 528+ 76DE              ;ansi_state:
+ 529+ 76DE              ;			call print
+ 530+ 76DE              ;			LD HL, str_separator
+ 531+ 76DE              ;			CALL print
+ 532+ 76DE              ;			JP read_key
+ 533+ 76DE
+ 534+ 76DE FE 08        not_set_ansi:           cp 8
+ 535+ 76E0 20 06                                jr nz,check_left
+ 536+ 76E2 CD 61 82                             call editor_backspace
+ 537+ 76E5 C3 A6 82                             jp editor_refresh
+ 538+ 76E8 FE 0C        check_left              cp 12
+ 539+ 76EA 20 06                                jr nz,check_right
+ 540+ 76EC CD 07 82                             call editor_left
+ 541+ 76EF C3 89 82                             jp editor_move
+ 542+ 76F2 FE 09        check_right             cp 9
+ 543+ 76F4 C2 FD 76                             jp nz,revoke_last_command
+ 544+ 76F7 CD 19 82                             call editor_right
+ 545+ 76FA C3 89 82                             jp editor_move
+ 546+ 76FD
+ 547+ 76FD FE 0B        revoke_last_command     cp 11
+ 548+ 76FF 28 2A                                jr z,history_up
+ 549+ 7701 FE 0A                                cp 10
+ 550+ 7703 C2 87 77                             jp nz,save_char
+ 551+ 7706 ED 5B 85 77                          ld de,(history_pos)
+ 552+ 770A 7A                                   ld a,d
+ 553+ 770B B3                                   or e
+ 554+ 770C CA AA 77                             jp z,restore_cur
+ 555+ 770F 21 00 70                             ld hl,Buffer4
+ 556+ 7712 E5                                   push hl
+ 557+ 7713 B7                                   or a
+ 558+ 7714 ED 52                                sbc hl,de
+ 559+ 7716 E1                                   pop hl
+ 560+ 7717 28 60                                jr z,history_blank
+ 561+ 7719 E5           history_back_scan       push hl
+ 562+ 771A 4E                                   ld c,(hl)
+ 563+ 771B 23                                   inc hl
+ 564+ 771C 46                                   ld b,(hl)
+ 565+ 771D 23                                   inc hl
+ 566+ 771E 09                                   add hl,bc
+ 567+ 771F E5                                   push hl
+ 568+ 7720 B7                                   or a
+ 569+ 7721 ED 52                                sbc hl,de
+ 570+ 7723 E1                                   pop hl
+ 571+ 7724 C1                                   pop bc
+ 572+ 7725 20 F2                                jr nz,history_back_scan
+ 573+ 7727 60                                   ld h,b
+ 574+ 7728 69                                   ld l,c
+ 575+ 7729 18 11                                jr history_validate
+ 576+ 772B 2A 85 77     history_up              ld hl,(history_pos)
+ 577+ 772E 7C                                   ld a,h
+ 578+ 772F B5                                   or l
+ 579+ 7730 28 07                                jr z,history_newest
+ 580+ 7732 4E                                   ld c,(hl)
+ 581+ 7733 23                                   inc hl
+ 582+ 7734 46                                   ld b,(hl)
+ 583+ 7735 23                                   inc hl
+ 584+ 7736 09                                   add hl,bc
+ 585+ 7737 18 03                                jr history_validate
+ 586+ 7739 21 00 70     history_newest          ld hl,Buffer4
+ 587+ 773C E5           history_validate        push hl
+ 588+ 773D 11 FF 73                             ld de,Buffer4+history_size-1
+ 589+ 7740 B7                                   or a
+ 590+ 7741 ED 52                                sbc hl,de
+ 591+ 7743 E1                                   pop hl
+ 592+ 7744 D2 AA 77                             jp nc,restore_cur
+ 593+ 7747 4E                                   ld c,(hl)
+ 594+ 7748 23                                   inc hl
+ 595+ 7749 46                                   ld b,(hl)
+ 596+ 774A 23                                   inc hl
+ 597+ 774B 78                                   ld a,b
+ 598+ 774C B1                                   or c
+ 599+ 774D CA AA 77                             jp z,restore_cur
+ 600+ 7750 E5                                   push hl
+ 601+ 7751 09                                   add hl,bc
+ 602+ 7752 11 00 74                             ld de,Buffer4+history_size
+ 603+ 7755 B7                                   or a
+ 604+ 7756 ED 52                                sbc hl,de
+ 605+ 7758 E1                                   pop hl
+ 606+ 7759 D2 AA 77                             jp nc,restore_cur ; ignore incomplete oldest record
+ 607+ 775C 2B                                   dec hl
+ 608+ 775D 2B                                   dec hl
+ 609+ 775E 22 85 77                             ld (history_pos),hl
+ 610+ 7761 23                                   inc hl
+ 611+ 7762 23                                   inc hl
+ 612+ 7763 11 B7 83                             ld de,Buffer1
+ 613+ 7766 ED B0                                ldir
+ 614+ 7768 ED 53 42 6E                          ld (text_end),de
+ 615+ 776C ED 53 40 6E                          ld (cursor),de
+ 616+ 7770 21 B7 83                             ld hl,Buffer1
+ 617+ 7773 22 44 6E                             ld (window),hl
+ 618+ 7776 C3 A6 82                             jp editor_refresh
+ 619+ 7779 21 00 00     history_blank           ld hl,0
+ 620+ 777C 22 85 77                             ld (history_pos),hl
+ 621+ 777F CD FA 81                             call editor_reset
+ 622+ 7782 C3 A6 82                             jp editor_refresh
+ 623+ 7785 00 00        history_pos             dw 0
+ 624+ 7787
+ 625+ 7787              ;save the key on the TX buffer	if there is room - if not, force transmit buffer and also if it is CR
+ 626+ 7787
+ 627+ 7787
+ 628+ 7787
+ 629+ 7787
+ 630+ 7787 FE 0D        save_char:		cp 13		;MB03- for print accept only chars 32-127
+ 631+ 7789 28 14        			jr z,not_lower
+ 632+ 778B
+ 633+ 778B FE 20        			cp 32
+ 634+ 778D DA C0 75     			jp c,read_key
+ 635+ 7790 FE 80        			cp 127+1
+ 636+ 7792 D2 C0 75     			jp nc,read_key		;end MB03
+ 637+ 7795
+ 638+ 7795 FE 61        			CP 'a'
+ 639+ 7797 38 06        			JR C,not_lower
+ 640+ 7799
+ 641+ 7799 FE 7B        			CP 'z'+1
+ 642+ 779B 30 02        			JR NC,not_lower
+ 643+ 779D
+ 644+ 779D              ;	DEFC CapsLock = ASMPC+1			;Self modify of next statement
+ 645+ 779D
+ 646+ 779D
+ 647+ 779D EE 20        CapsLock		XOR %00100000		;By default is on
+ 648+ 779F
+ 649+ 779F FE 0D        not_lower:             cp 13
+ 650+ 77A1 CA AD 77                             jp z,do_CRLF
+ 651+ 77A4 CD 2C 82                             call editor_insert
+ 652+ 77A7 C3 A6 82                             jp editor_refresh
+ 653+ 77AA C3 C0 75     restore_cur:           jp read_key
+ 654+ 77AD
+ 655+ 77AD
+ 656+ 77AD 3E 0A        do_CRLF:               ld a,10
+ 657+ 77AF F5           emit_EOT:              push af
+ 658+ 77B0 CD B6 82                             call ui_hide
+ 659+ 77B3 2A 42 6E                             ld hl,(text_end)
+ 660+ 77B6 36 00                                ld (hl),0
+ 661+ 77B8 21 B7 83                             ld hl,Buffer1
+ 662+ 77BB CD CC 7C                             call print
+ 663+ 77BE 3E 0D                                ld a,13
+ 664+ 77C0 D7                                   rst 16
+ 665+ 77C1 F1                                   pop af
+ 666+ 77C2 2A 42 6E                             ld hl,(text_end)
+ 667+ 77C5 FE 1A                                cp 26
+ 668+ 77C7 28 07                                jr z,append_eot
+ 669+ 77C9 36 0D                                ld (hl),13
+ 670+ 77CB 23                                   inc hl
+ 671+ 77CC 36 0A                                ld (hl),10
+ 672+ 77CE 18 05                                jr end_append
+ 673+ 77D0 36 1A        append_eot             ld (hl),26
+ 674+ 77D2 23                                   inc hl
+ 675+ 77D3 36 0A                                ld (hl),10
+ 676+ 77D5 23           end_append             inc hl
+ 677+ 77D6 36 00                                ld (hl),0
+ 678+ 77D8 2B                                   dec hl
+ 679+ 77D9 CD E6 78                             call save_last_com
+ 680+ 77DC DD CB 00 46                          BIT 0,(IX+0)
+ 681+ 77E0 CA C9 78                             JP Z,not_sipsend
+ 682+ 77E3 ~            /*
+ 683+ 77E3 ~            Hood's part. Extending syntax of a commad being sent. Old way commands preserved.
+ 684+ 77E3 ~            command syntax: "x1, "x2", ...", where x1= number in decimal of max length 5, x2= ASCII string of any length enclosed in quotation marks. Such type of command is needed for communication with eg. TNFS servers. See Spectranet info on Wiki.
+ 685+ 77E3 ~
+ 686+ 77E3 ~            eg: 	1234,"hello"...   valid
+ 687+ 77E3 ~            	"1234","hello"... valid
+ 688+ 77E3 ~            	"1234a","hello"... valid
+ 689+ 77E3 ~            	1234           ...valid
+ 690+ 77E3 ~            	"hello"       ... valid
+ 691+ 77E3 ~            	"1234",hello... invalid
+ 692+ 77E3 ~            	1234a,"hello"...invalid
+ 693+ 77E3 ~            	123456,"hello"...invalid
+ 694+ 77E3 ~            	"1234","hello... invalid
+ 695+ 77E3 ~
+ 696+ 77E3 ~            	1234.... will be converted to #4D2, so bytes #D2 and 4 will be sent
+ 697+ 77E3 ~            	123..... will be converted to #7B, so byte #7B will be sent
+ 698+ 77E3 ~            */
+ 699+ 77E3 11 BC 88     		ld de,Buffer3
+ 700+ 77E6 ED 53 2C 78  		ld (buf3+1),de
+ 701+ 77EA 11 B7 83     		ld de,Buffer1		;now decide if user has sent an old way command
+ 702+ 77ED 1A           		ld a,(de)		;ie. a plain input from the keyboard
+ 703+ 77EE FE 22        		cp 34			;quotation mark?
+ 704+ 77F0 CA 63 78     		jp z,ASCIIstring
+ 705+ 77F3 FE 30        		cp "0"
+ 706+ 77F5 DA A4 78     		jp c,old_way_command
+ 707+ 77F8 FE 3A        		cp "9"+1
+ 708+ 77FA D2 A4 78     		jp nc,old_way_command
+ 709+ 77FD
+ 710+ 77FD
+ 711+ 77FD 1A           evalloop	ld a,(de)		;now we deal with new way command, analyse its segments,ie. individual x1, x2...
+ 712+ 77FE FE 22        		cp 34			;evaluate if it is a valid command string
+ 713+ 7800 CA 63 78     		jp z,ASCIIstring
+ 714+ 7803
+ 715+ 7803 0E 06        evalnumb	ld c,6		;now evaluate number string, look for "," or EOL (13,10)
+ 716+ 7805 D5           		push de
+ 717+ 7806 FE 2C        evalnumbloop	cp ","
+ 718+ 7808 28 19        		jr z,evalnumbend
+ 719+ 780A
+ 720+ 780A FE 0D        eval1310	cp 13
+ 721+ 780C 20 06        		jr nz,evalNUMB
+ 722+ 780E 13           		inc de
+ 723+ 780F 1A           		ld a,(de)
+ 724+ 7810 FE 0A        		cp 10
+ 725+ 7812 28 0F        		jr z,evalnumbend
+ 726+ 7814
+ 727+ 7814 FE 30        evalNUMB	cp "0"
+ 728+ 7816 38 57        		jr c,invalid
+ 729+ 7818 FE 3A        		cp "9"+1
+ 730+ 781A 30 53        		jr nc,invalid
+ 731+ 781C 0D           		dec c
+ 732+ 781D 28 50        		jr z,invalid
+ 733+ 781F 13           		inc de
+ 734+ 7820 1A           		ld a,(de)
+ 735+ 7821 18 E3        		jr evalnumbloop
+ 736+ 7823
+ 737+ 7823 D1           evalnumbend	pop de		;starting address of the numberin the string
+ 738+ 7824 08           		ex af,af'
+ 739+ 7825              ;		ld a,6
+ 740+ 7825              ;		sub c		;A=len of number
+ 741+ 7825 CD 75 7A     		call ConvRStr16
+ 741+ 7828               ;convert ASCII number to number in HL
+ 742+ 7828 13           		inc de
+ 743+ 7829 42           		ld b,d
+ 744+ 782A 4B           		ld c,e
+ 745+ 782B 11 BC 88     buf3		ld de,Buffer3	;put the number in HL to Buffer3
+ 746+ 782E 7D           		ld a,l
+ 747+ 782F 12           		ld (de),a
+ 748+ 7830 7C           		ld a,h
+ 749+ 7831 B7           		or a
+ 750+ 7832 28 02        		jr z,_8bitvalue
+ 751+ 7834
+ 752+ 7834 13           _16bitvalue	inc de
+ 753+ 7835 12           		ld (de),a
+ 754+ 7836
+ 755+ 7836 08           _8bitvalue	ex af,af'
+ 756+ 7837
+ 757+ 7837 13           		inc de
+ 758+ 7838 ED 53 2C 78  		ld (buf3+1),de
+ 759+ 783C
+ 760+ 783C FE 0A        		cp 10		;total end of string?
+ 761+ 783E 28 04        		jr z,endofstring
+ 762+ 7840 50           		ld d,b
+ 763+ 7841 59           		ld e,c
+ 764+ 7842 18 B9        		jr evalloop
+ 765+ 7844
+ 766+ 7844 3E 0D        endofstring	ld a,13		;add 13,10
+ 767+ 7846 12           		ld (de),a
+ 768+ 7847 13           		inc de
+ 769+ 7848 3E 0A        		ld a,10
+ 770+ 784A 12           		ld (de),a	;now we have command to be sent
+ 771+ 784B 13           		inc de		;calculate its length
+ 772+ 784C 21 BC 88     		ld hl,Buffer3
+ 773+ 784F EB           		ex de,hl
+ 774+ 7850 B7           		or a
+ 775+ 7851 ED 52        		sbc hl,de
+ 776+ 7853 44           		ld b,h
+ 777+ 7854 4D           		ld c,l		;BC= len of command, max. 255 bytes (enough in real life)
+ 778+ 7855 79           		ld a,c
+ 779+ 7856 21 BC 88     		ld hl,Buffer3
+ 780+ 7859 11 B7 83     		ld de,Buffer1	;move Buffer3 to Buffer1
+ 781+ 785C ED B0        		ldir
+ 782+ 785E 61           		ld h,c
+ 783+ 785F 6F           		ld l,a		;HL=len of command
+ 784+ 7860 C3 AB 78     		jp place_com_len	;and connect to the main program
+ 785+ 7863
+ 786+ 7863
+ 787+ 7863
+ 788+ 7863 0E 00        ASCIIstring	ld c,0		;now evaluate ASCII string
+ 789+ 7865 D5           		push de		;start of ASCII string -1
+ 790+ 7866 13           ASCIIstringloop	inc de
+ 791+ 7867 1A           		ld a,(de)
+ 792+ 7868 FE 22        		cp 34
+ 793+ 786A 28 0C        		jr z,ASCII1310
+ 794+ 786C 0C           		inc c
+ 795+ 786D 20 F7        		jr nz,ASCIIstringloop
+ 796+ 786F 21 5A 81     invalid		ld hl,SYNERR
+ 797+ 7872 CD CC 7C     		call print
+ 798+ 7875 C3 E0 78     		jp reset_buffer	;invalid syntax, connect to the main program
+ 799+ 7878              				;no second " found, invalid
+ 800+ 7878 13           ASCII1310	inc de
+ 801+ 7879 1A           		ld a,(de)
+ 802+ 787A FE 0D        		cp 13
+ 803+ 787C 20 06        		jr nz,ASCIIcomma
+ 804+ 787E 13           		inc de
+ 805+ 787F 1A           		ld a,(de)
+ 806+ 7880 FE 0A        		cp 10
+ 807+ 7882 28 04        		jr z,ASCIIstringend
+ 808+ 7884
+ 809+ 7884 FE 2C        ASCIIcomma	cp ","
+ 810+ 7886 20 E7        		jr nz,invalid
+ 811+ 7888
+ 812+ 7888 08           ASCIIstringend	ex af,af'		;A= either , or 10 to determin evaluation end
+ 813+ 7889 E1           		pop hl		;was DE, now move the string from Buffer3 to Buffer1
+ 814+ 788A 23           		inc hl
+ 815+ 788B
+ 816+ 788B
+ 817+ 788B ED 5B 2C 78  		ld de,(buf3+1)
+ 818+ 788F 06 00        		ld b,0
+ 819+ 7891 79           		ld a,c
+ 820+ 7892 ED B0        		ldir
+ 821+ 7894 ED 53 2C 78  		ld (buf3+1),de
+ 822+ 7898 08           		ex af,af'
+ 823+ 7899 FE 0A        		cp 10
+ 824+ 789B 28 A7        		jr z,endofstring
+ 825+ 789D 54           		ld d,h
+ 826+ 789E 5D           		ld e,l		;DE=source Buffer1
+ 827+ 789F 13           		inc de
+ 828+ 78A0 13           		inc de
+ 829+ 78A1 C2 FD 77     		jp nz,evalloop	;evaluate next segment
+ 830+ 78A4              ;end of Hood's part
+ 831+ 78A4
+ 832+ 78A4
+ 833+ 78A4
+ 834+ 78A4 23           old_way_command		INC HL			;So calc length to send
+ 835+ 78A5 11 B7 83     			LD DE,Buffer1
+ 836+ 78A8 B7           			OR A			;CCF
+ 837+ 78A9 ED 52        			SBC HL,DE
+ 838+ 78AB
+ 839+ 78AB 11 EA 89     place_com_len		LD DE,STRINGNUM
+ 840+ 78AE CD 6B 7C     			CALL string_dec
+ 841+ 78B1 3E 0D        			LD A,13
+ 842+ 78B3 12           			LD (DE),A
+ 843+ 78B4 13           			INC DE
+ 844+ 78B5 3E 0A        			LD A,10
+ 845+ 78B7 12           			LD (DE),A
+ 846+ 78B8
+ 847+ 78B8 21 DF 89     			LD HL,CIPSEND
+ 848+ 78BB              ;			PUSH HL
+ 849+ 78BB              ;			CALL print
+ 850+ 78BB              ;			POP HL
+ 851+ 78BB CD 13 7A     			CALL tx_out
+ 852+ 78BE
+ 853+ 78BE              ;Now wait for OK to send ***TODO make this a generic string receive subroutine...
+ 854+ 78BE
+ 855+ 78BE 21 E2 81     			LD HL,CIPSTART
+ 856+ 78C1 CD 33 7A     			CALL wait_streamstring
+ 857+ 78C4
+ 858+ 78C4 38 17        			JR C,cancel_sipsend		;abandon if not received
+ 859+ 78C6
+ 860+ 78C6 CD BE 7A     			CALL DiagRST16			;Print char if in diagnostic mode
+ 861+ 78C9
+ 862+ 78C9              not_sipsend:
+ 863+ 78C9 21 B7 83     			ld hl, Buffer1
+ 864+ 78CC CD 13 7A     			CALL tx_out
+ 865+ 78CF
+ 866+ 78CF DD CB 00 46  			BIT 0,(IX+0)
+ 867+ 78D3 28 0B        			JR Z,reset_buffer
+ 868+ 78D5
+ 869+ 78D5 21 E8 81     			LD HL,CIPSOK			;Wait for SEND OK skipping other data.
+ 870+ 78D8 CD 33 7A     			CALL wait_streamstring
+ 871+ 78DB 30 03        			JR NC,reset_buffer
+ 872+ 78DD
+ 873+ 78DD              cancel_sipsend:
+ 874+ 78DD CD 0C 7A     			CALL tx_timeout
+ 875+ 78E0
+ 876+ 78E0
+ 877+ 78E0 CD FA 81     reset_buffer:          call editor_reset
+ 878+ 78E3 C3 C0 75                             jp read_key
+ 879+ 78E6
+ 880+ 78E6 E5           save_last_com           push hl
+ 881+ 78E7 21 00 00                             ld hl,0
+ 882+ 78EA 22 85 77                             ld (history_pos),hl
+ 883+ 78ED E1                                   pop hl
+ 884+ 78EE FE 0A                                cp 10
+ 885+ 78F0 C0                                   ret nz
+ 886+ 78F1 E5                                   push hl
+ 887+ 78F2 11 B7 83                             ld de,Buffer1
+ 888+ 78F5 1A                                   ld a,(de)
+ 889+ 78F6 FE 0D                                cp 13
+ 890+ 78F8 28 24                                jr z,slend
+ 891+ 78FA B7                                   or a
+ 892+ 78FB ED 52                                sbc hl,de
+ 893+ 78FD 2B                                   dec hl             ; text length, including 256-byte lines
+ 894+ 78FE E5                                   push hl
+ 895+ 78FF 11 FE 03                             ld de,history_size-2
+ 896+ 7902 EB                                   ex de,hl
+ 897+ 7903 B7                                   or a
+ 898+ 7904 ED 52                                sbc hl,de
+ 899+ 7906 44                                   ld b,h
+ 900+ 7907 4D                                   ld c,l
+ 901+ 7908 21 FF 6F                             ld hl,Buffer4-1
+ 902+ 790B 09                                   add hl,bc
+ 903+ 790C 11 FF 73                             ld de,Buffer4+history_size-1
+ 904+ 790F ED B8                                lddr               ; compact records; evict oldest tail
+ 905+ 7911 C1                                   pop bc
+ 906+ 7912 ED 43 00 70                          ld (Buffer4),bc    ; 16-bit record length
+ 907+ 7916 21 B7 83                             ld hl,Buffer1
+ 908+ 7919 11 02 70                             ld de,Buffer4+2
+ 909+ 791C ED B0                                ldir
+ 910+ 791E E1           slend                   pop hl
+ 911+ 791F C9                                   ret
+ 912+ 7920
+ 913+ 7920              read_rx:
+ 914+ 7920 CD A8 7A     			CALL GET_BYTE
+ 915+ 7923 DA C0 75     			JP C,read_key
+ 916+ 7926
+ 917+ 7926              ;*** TODO This limits 8 bit transmission so probably redundant with status register?	Added
+ 918+ 7926              ;back on New TBU >7 as now seem to get one.
+ 919+ 7926 FE FF        			cp 0ffh
+ 920+ 7928 CA C8 75     			jp z, read_key_nc 			; if we dont have anything to show
+ 921+ 792B
+ 922+ 792B FE 0A        			cp 10 				; dont show the line feed
+ 923+ 792D CA C8 75     			jp z, read_key_nc
+ 924+ 7930
+ 925+ 7930 F5           			push af
+ 926+ 7931 3E FF        			ld a,255
+ 927+ 7933 32 8C 5C     			ld (23692),a
+ 928+ 7936 CD B6 82     			call ui_hide
+ 929+ 7939 F1           			pop af
+ 930+ 793A              ;Check for any other codes to process here
+ 931+ 793A FE 0D        			CP 13
+ 932+ 793C CA F9 79     			JP Z,print1
+ 933+ 793F
+ 934+ 793F DD CB 00 46  not_rec_CR:		BIT 0,(IX+0)			;Are we in CIPSEND mode?
+ 935+ 7943 CA D7 79     			JP Z,not_ipdstart
+ 936+ 7946
+ 937+ 7946 FE 2B        			CP '+'
+ 938+ 7948 C2 D7 79     			JP NZ,not_ipdstart
+ 939+ 794B
+ 940+ 794B DD CB 00 D6  			SET 2,(IX+0)			;Start looking for IPDDATA
+ 941+ 794F
+ 942+ 794F CD A4 7A     			CALL GET_BYTE_WAIT		;Wait a while (should not check for IPD inside one...)
+ 943+ 7952 38 74        			JR C,cancel_ipdstart		;abandon if not received.1
+ 944+ 7954 FE 49        			CP 'I'
+ 945+ 7956 20 70        			JR NZ,cancel_ipdstart		;or is wrong char
+ 946+ 7958 CD A4 7A     			CALL GET_BYTE_WAIT		;Wait a while
+ 947+ 795B 38 6B        			JR C,cancel_ipdstart		;abandon if not received
+ 948+ 795D FE 50        			CP 'P'
+ 949+ 795F 20 67        			JR NZ,cancel_ipdstart
+ 950+ 7961 CD A4 7A     			CALL GET_BYTE_WAIT		;Wait a while
+ 951+ 7964 38 62        			JR C,cancel_ipdstart		;abandon if not received.1
+ 952+ 7966 FE 44        			CP 'D'
+ 953+ 7968 20 5E        			JR NZ,cancel_ipdstart
+ 954+ 796A CD A4 7A     			CALL GET_BYTE_WAIT		;Wait a while
+ 955+ 796D 38 59        			JR C,cancel_ipdstart		;abandon if not received.1
+ 956+ 796F FE 2C        			CP ','
+ 957+ 7971 20 55        			JR NZ,cancel_ipdstart
+ 958+ 7973 CD 5F 7A     			CALL GET_NUM			;get a number stream terminated with : or ;
+ 959+ 7976 38 50        			JR C,cancel_ipdstart
+ 960+ 7978 DD 75 01     			LD (IX+1),L			;Could be a while 2K packet perhaps so size is in DE
+ 961+ 797B DD 74 02     			LD (IX+2),H
+ 962+ 797E EB           			EX DE,HL
+ 963+ 797F
+ 964+ 797F 21 00 04     			LD HL,Buf2Pos-Buffer2		;Check length not longer than buffer
+ 965+ 7982 B7           			OR A
+ 966+ 7983 ED 52        			SBC HL,DE
+ 967+ 7985 38 41        			JR C,cancel_ipdstart
+ 968+ 7987
+ 969+ 7987              ; OK Lets get the data from the IPD packet as quickly as possible.
+ 970+ 7987 DD CB 00 76  			BIT 6,(IX+0)			;unless in command debug mode skip.
+ 971+ 798B 28 14        			JR Z, just_get_ipdpacket
+ 972+ 798D
+ 973+ 798D D5           			PUSH DE
+ 974+ 798E 3E 5B        			LD A,'['
+ 975+ 7990 D7           			RST 16
+ 976+ 7991 21 DD 81     			LD HL,IPDSTART
+ 977+ 7994 CD CC 7C     			CALL print
+ 978+ 7997 21 BF 89     			LD HL,GOTNUM
+ 979+ 799A CD CC 7C     			CALL print
+ 980+ 799D 3E 5D        			LD A,']'
+ 981+ 799F D7           			RST 16
+ 982+ 79A0 D1           			POP DE
+ 983+ 79A1
+ 984+ 79A1 21 BA 84     just_get_ipdpacket:	LD HL,Buffer2
+ 985+ 79A4
+ 986+ 79A4              get_fast_packet:
+ 987+ 79A4 D5           			PUSH DE
+ 988+ 79A5 CD A8 7A     			CALL GET_BYTE
+ 989+ 79A8 D1           			POP DE
+ 990+ 79A9              ;			JR C,get_fast_timeout
+ 991+ 79A9
+ 992+ 79A9 77           			LD (HL),A
+ 993+ 79AA 23            			INC HL
+ 994+ 79AB 1B            			DEC DE
+ 995+ 79AC 7B            			LD A,E
+ 996+ 79AD B2            			OR D
+ 997+ 79AE 20 F4         			JR NZ,get_fast_packet
+ 998+ 79B0 36 00         			LD (HL),0
+ 999+ 79B2 18 08         			JR print_ipdpacket
+1000+ 79B4
+1001+ 79B4 36 00        get_fast_timeout:	LD (HL),0
+1002+ 79B6 21 CC 7D     			LD HL,str_TIMEOUTRX
+1003+ 79B9 CD CC 7C     			CALL print
+1004+ 79BC
+1005+ 79BC
+1006+ 79BC 21 BA 84     print_ipdpacket:	LD HL,Buffer2
+1007+ 79BF CD CC 7C     			CALL print
+1008+ 79C2
+1009+ 79C2 3E 0D        			LD A,13				;End up double spaced but, at least all packets end on a newline.
+1010+ 79C4 D7           			RST 16
+1011+ 79C5
+1012+ 79C5 C3 20 79     			JP read_rx
+1013+ 79C8
+1014+ 79C8
+1015+ 79C8 DD CB 00 76  cancel_ipdstart:	BIT 6,(IX+0)			;unless in command debug mode skip.
+1016+ 79CC 28 EE        			JR Z, print_ipdpacket
+1017+ 79CE
+1018+ 79CE 21 B1 81     			LD HL,IPDABORT
+1019+ 79D1 CD CC 7C     			CALL print
+1020+ 79D4 C3 20 79     			JP read_rx
+1021+ 79D7
+1022+ 79D7
+1023+ 79D7 DD CB 00 4E  not_ipdstart:		BIT 1,(IX+0)
+1024+ 79DB FE 1B        			CP 27				;Is this an ESC sequence starting
+1025+ 79DD 20 07        			JR NZ,not_rec_ESC
+1026+ 79DF
+1027+ 79DF              ;If so then look to see if we get a sequence
+1028+ 79DF DD CB 00 D6  			SET 2,(IX+0)			;Mark we are looking for an ESC sequence
+1029+ 79E3 C3 20 79     			JP read_rx
+1030+ 79E6
+1031+ 79E6              not_rec_ESC:
+1032+ 79E6
+1033+ 79E6 FE 20        			CP 32
+1034+ 79E8 38 04        			JR C,escaped			;less than 32 are escaped
+1035+ 79EA
+1036+ 79EA FE 80        			CP 128
+1037+ 79EC 38 0B        			JR C,print1			;32-127 just printed
+1038+ 79EE
+1039+ 79EE F5           escaped:		PUSH AF
+terminal11_main.asm(1040): warning: value 0x5C5C is truncated to 8bit value: 0x5C
+1040+ 79EF 3E 5C        			LD A,'\\'
+1041+ 79F1 D7           			RST 16
+1042+ 79F2 F1           			POP AF
+1043+ 79F3 CD 00 7D     			CALL prt_hex
+1044+ 79F6 C3 C8 75     			JP read_key_nc
+1045+ 79F9
+1046+ 79F9              print1:
+1047+ 79F9 D7           			rst 16 ;print the char
+1048+ 79FA
+1049+ 79FA C3 C8 75     			JP read_key_nc
+1050+ 79FD
+1051+ 79FD
+1052+ 79FD ~            /*Hood, ZX Next related, useless for mb or el wifi
+1053+ 79FD ~            ;---------------------------------------------------------------------------------
+1054+ 79FD ~            ;find_esp: Tries all pre-scaler values to locate an ESP - then sets a known
+1055+ 79FD ~            ;good baud rate of 115200 before entering the terminal!
+1056+ 79FD ~            ;
+1057+ 79FD ~            ;Note that Screen timing is irrelevant here as we set our end to something
+1058+ 79FD ~            ;that works once we get ERROR and OK!
+1059+ 79FD ~
+1060+ 79FD ~            find_esp:
+1061+ 79FD ~            			LD HL,Searching
+1062+ 79FD ~            			CALL print
+1063+ 79FD ~
+1064+ 79FD ~            			LD HL,1		; Lowest pre-scaler we can use > 2Mbs
+1065+ 79FD ~
+1066+ 79FD ~            find_esp_next:
+1067+ 79FD ~            			PUSH HL
+1068+ 79FD ~
+1069+ 79FD ~            			LD A,'/'
+1070+ 79FD ~            			RST 16
+1071+ 79FD ~            			LD A,8
+1072+ 79FD ~            			RST 16
+1073+ 79FD ~
+1074+ 79FD ~            			POP HL
+1075+ 79FD ~            			PUSH HL
+1076+ 79FD ~
+1077+ 79FD ~            			LD BC,RX_SETBAUD
+1078+ 79FD ~            			LD A,L
+1079+ 79FD ~            			AND %01111111	; Res BIT 7 to request write to lower 7 bits
+1080+ 79FD ~            			OUT (C),A
+1081+ 79FD ~            			LD A,H
+1082+ 79FD ~            			RL L		; Bit 7 in Carry
+1083+ 79FD ~            			RLA		; Now in Bit 0
+1084+ 79FD ~            			OR %10000000	; Set MSB to request write to upper 7 bits
+1085+ 79FD ~            			OUT (C),A
+1086+ 79FD ~
+1087+ 79FD ~            			LD A,'-'
+1088+ 79FD ~            			RST 16
+1089+ 79FD ~            			LD A,8
+1090+ 79FD ~            			RST 16
+1091+ 79FD ~
+1092+ 79FD ~            			LD HL,CRLF	; Send a CRLF
+1093+ 79FD ~            			CALL tx_out
+1094+ 79FD ~
+1095+ 79FD ~            			LD HL,ERROR
+1096+ 79FD ~            			CALL wait_streamstring
+1097+ 79FD ~            			JR NC,find_esp_maybe
+1098+ 79FD ~
+1099+ 79FD ~            			LD A,'\\'
+1100+ 79FD ~            			RST 16
+1101+ 79FD ~            			LD A,8
+1102+ 79FD ~            			RST 16
+1103+ 79FD ~
+1104+ 79FD ~            			POP HL
+1105+ 79FD ~
+1106+ 79FD ~            			JR find_esp_nextps
+1107+ 79FD ~
+1108+ 79FD ~            find_esp_maybe:
+1109+ 79FD ~            			LD A,'o'	; Mark a try to get OK
+1110+ 79FD ~            			RST 16
+1111+ 79FD ~
+1112+ 79FD ~            			LD HL,DEFBAUD
+1113+ 79FD ~            			CALL tx_out
+1114+ 79FD ~
+1115+ 79FD ~            			LD HL,OK
+1116+ 79FD ~            			CALL wait_streamstring
+1117+ 79FD ~
+1118+ 79FD ~            			POP HL
+1119+ 79FD ~
+1120+ 79FD ~            			JR C,find_esp_nextps
+1121+ 79FD ~
+1122+ 79FD ~            			LD A,13
+1123+ 79FD ~            			RST 16
+1124+ 79FD ~
+1125+ 79FD ~            			JP normal_start
+1126+ 79FD ~
+1127+ 79FD ~            find_esp_nextps:
+1128+ 79FD ~            			INC HL		; OK failed so try next prescaler.
+1129+ 79FD ~
+1130+ 79FD ~            			XOR A
+1131+ 79FD ~            			OR L
+1132+ 79FD ~            			JR NZ,find_esp_nopace
+1133+ 79FD ~
+1134+ 79FD ~            			PUSH HL
+1135+ 79FD ~            			LD A,'.'
+1136+ 79FD ~            			RST 16
+1137+ 79FD ~            			POP HL
+1138+ 79FD ~
+1139+ 79FD ~            find_esp_nopace:
+1140+ 79FD ~            			BIT 6,H		; At 16384 stop as that is max prescaler
+1141+ 79FD ~            			JR Z,find_esp_next ;Keep searching
+1142+ 79FD ~
+1143+ 79FD ~            			JP finish_nothl	; Restore system and exit not found
+1144+ 79FD ~            */
+1145+ 79FD
+1146+ 79FD
+1147+ 79FD              ;---------------------------------------------------------------------------------
+1148+ 79FD              finish:
+1149+ 79FD
+1150+ 79FD              finish_nothl:
+1151+ 79FD CD B6 82     			call ui_hide
+1152+ 7A00                      IFDEF ZXNEXT
+1153+ 7A00 21 A9 7F                             ld hl,wifion
+1154+ 7A03 CD CC 7C                             call print
+1155+ 7A06                      ENDIF
+1156+ 7A06
+1157+ 7A06              		IFNDEF setup		;no setup version will turn wifi off
+1158+ 7A06                      IFNDEF ZXNEXT
+1159+ 7A06 ~            ;MB03 code
+1160+ 7A06 ~            			ld bc,#703B	;turn Wifi off
+1161+ 7A06 ~            			ld a,5
+1162+ 7A06 ~            			out (c),a
+1163+ 7A06 ~            			inc b
+1164+ 7A06 ~            			in a,(c)
+1165+ 7A06 ~            			and %11111110
+1166+ 7A06 ~            			out (C),a
+1167+ 7A06 ~            			ld hl,turnoff
+1168+ 7A06 ~            finish_message          call print
+1169+ 7A06                      ENDIF
+1170+ 7A06              		ENDIF
+1171+ 7A06              ;end of MB03 code
+1172+ 7A06 AF           			xor	a			;No error
+1173+ 7A07 E1           			pop	hl			;Dump buffer position
+1174+ 7A08 DD E1        			POP	IX
+1175+ 7A0A FB           			EI
+1176+ 7A0B C9           			ret
+1177+ 7A0C
+1178+ 7A0C              ;---------------------------------------------------------------------------------
+1179+ 7A0C              ; Send Bytes from HL terminated with LF char 10
+1180+ 7A0C
+1181+ 7A0C
+1182+ 7A0C 21 AB 7D     tx_timeout:		LD HL, str_TIMEOUTCS
+1183+ 7A0F CD CC 7C     			CALL print
+1184+ 7A12
+1185+ 7A12 C9           end_tx:			RET
+1186+ 7A13
+1187+ 7A13
+1188+ 7A13              tx_out:
+1189+ 7A13 11 00 08     			LD DE,2048		;Delay timeout - was 20 at 112500 baud - need to be higher at lower baud rates...
+1190+ 7A16
+1191+ 7A16 01 3B 13     			LD BC,TX_CHKREADY
+1192+ 7A19 ED 78        tx_out_wait:		IN A,(C)
+1193+ 7A1B E6 02        			AND %00000010		;Check if TX available for send, wait until it is (with timeout)
+1194+ 7A1D 28 0B        			JR Z,tx_out_ready
+1195+ 7A1F
+1196+ 7A1F 1B           			DEC DE
+1197+ 7A20 7A           			LD A,D
+1198+ 7A21 B3           			OR E
+1199+ 7A22 20 F5        			JR NZ,tx_out_wait
+1200+ 7A24
+1201+ 7A24 21 8B 7D     			LD HL, str_TIMEOUT	;Prints an error if we do not become ready...
+1202+ 7A27 C3 CC 7C     			JP print
+1203+ 7A2A
+1204+ 7A2A 7E           tx_out_ready:		LD A,(HL)
+1205+ 7A2B ED 79        			OUT (c),a
+1206+ 7A2D
+1207+ 7A2D FE 0A        			CP 10
+1208+ 7A2F C8           			RET Z
+1209+ 7A30
+1210+ 7A30              ;			DEC E
+1211+ 7A30              ;			RET Z
+1212+ 7A30
+1213+ 7A30 23           			INC HL
+1214+ 7A31 18 E0        			JR tx_out
+1215+ 7A33
+1216+ 7A33              ;---------------------------------------------------------------------------------
+1217+ 7A33              ;Code to wait for a specific string in the Bitstream...
+1218+ 7A33              ;HL points at the string we are waiting for.
+1219+ 7A33              ;
+1220+ 7A33              ;Return Carry SET if a timeout either waiting for characters in the stream or too many false starts
+1221+ 7A33              ;
+1222+ 7A33
+1223+ 7A33              wait_streamstring:
+1224+ 7A33 0E 14        			LD C,20				;We will slip the stream upto X times
+1225+ 7A35
+1226+ 7A35              loop_slipstart:
+1227+ 7A35 E5           			PUSH HL				;Preseve in case we need to reset to slip.
+1228+ 7A36 06 1E        			LD B,30				;We will skip over upto 30 chars looking for our start char
+1229+ 7A38
+1230+ 7A38              loop_waitstart:
+1231+ 7A38 C5           			PUSH BC
+1232+ 7A39
+1233+ 7A39 CD 9E 7A     			CALL GET_BYTE_ALLOWIPD
+1234+ 7A3C              ;			JR C,end_waitstring		;abandon if not received (skipped at mo 0 returned to allow 20 retries)
+1235+ 7A3C BE           			CP (HL)
+1236+ 7A3D 28 06        			JR Z,begin_waitstring		;if it is the first character then lets look
+1237+ 7A3F
+1238+ 7A3F C1           			POP BC
+1239+ 7A40
+1240+ 7A40 10 F6        			DJNZ loop_waitstart
+1241+ 7A42
+1242+ 7A42 37           			SCF
+1243+ 7A43 18 18        			JR end_waitstring_2		;Timeout waiting for a start character.
+1244+ 7A45
+1245+ 7A45 CD BE 7A     begin_waitstring:	CALL DiagRST16			; We are going to destroy A so print now if needed.
+1246+ 7A48 23           			INC HL				;Next char to look for
+1247+ 7A49
+1248+ 7A49 7E           			LD A,(HL)			;If next char to find is a Zero (end of string marker)
+1249+ 7A4A B7           			OR A				;also CCF
+1250+ 7A4B 28 0F        			JR Z,end_waitstring 		;Then we have a match
+1251+ 7A4D
+1252+ 7A4D CD 9E 7A     			CALL GET_BYTE_ALLOWIPD
+1253+ 7A50 38 0A        			JR C,end_waitstring		;abandon if not received
+1254+ 7A52 BE           			CP (HL)				;check if a match
+1255+ 7A53 28 F0        			JR Z,begin_waitstring
+1256+ 7A55
+1257+ 7A55 C1           			POP BC				;Any character which does not match restarts the look
+1258+ 7A56 E1           			POP HL
+1259+ 7A57 0D           			DEC C
+1260+ 7A58 20 DB        			JR NZ,loop_slipstart
+1261+ 7A5A 37           			SCF
+1262+ 7A5B C9           			RET
+1263+ 7A5C
+1264+ 7A5C              end_waitstring:
+1265+ 7A5C C1           			POP BC
+1266+ 7A5D              end_waitstring_2:
+1267+ 7A5D E1           			POP HL
+1268+ 7A5E
+1269+ 7A5E C9           			RET
+1270+ 7A5F
+1271+ 7A5F              ;---------------------------------------------------------------------------------
+1272+ 7A5F              ;Get a decimal number from bytestream in BC - uses D and HL as E and BC destroyed by subs used
+1273+ 7A5F              ;Carry set if more than 4 digits received which would overflow buffers in more ways than one.
+1274+ 7A5F
+1275+ 7A5F 16 04        GET_NUM:		LD D,4				;Max of 4 characters
+1276+ 7A61 21 BF 89     			LD HL,GOTNUM
+1277+ 7A64              GN_LOOP:
+1278+ 7A64 CD 8C 7A     			CALL GET_BYTE_WAIT_NUM
+1279+ 7A67 38 07        			JR C,GN_END
+1280+ 7A69 77           			LD (HL),A
+1281+ 7A6A 23           			INC HL
+1282+ 7A6B 15           			DEC D
+1283+ 7A6C 20 F6        			JR NZ,GN_LOOP
+1284+ 7A6E 37           			SCF				;error too many digits
+1285+ 7A6F C9           			RET
+1286+ 7A70
+1287+ 7A70 36 00        GN_END:			LD (HL),0			;terminate Number early with a zero
+1288+ 7A72
+1289+ 7A72              ;Drop through to actually convert string at HL to number in BC
+1290+ 7A72
+1291+ 7A72 11 BF 89     			LD DE,GOTNUM
+1292+ 7A75
+1293+ 7A75              ConvRStr16:
+1294+ 7A75              ;===============================================================
+1295+ 7A75              ;http://z80-heaven.wikidot.com/math#toc32
+1296+ 7A75              ;Input:
+1297+ 7A75              ;     DE points to the base 10 number string in RAM.
+1298+ 7A75              ;Outputs:
+1299+ 7A75              ;     HL is the 16-bit value of the number
+1300+ 7A75              ;     DE points to the byte after the number
+1301+ 7A75              ;     BC is HL/10
+1302+ 7A75              ;     z flag reset (nz)
+1303+ 7A75              ;     c flag reset (nc)
+1304+ 7A75              ;Destroys:
+1305+ 7A75              ;     A (actually, add 30h and you get the ending token)
+1306+ 7A75              ;Size:  23 bytes
+1307+ 7A75              ;Speed: 104n+42+11c
+1308+ 7A75              ;       n is the number of digits
+1309+ 7A75              ;       c is at most n-2
+1310+ 7A75              ;       at most 595 cycles for any 16-bit decimal value
+1311+ 7A75              ;===============================================================
+1312+ 7A75 21 00 00          ld hl,0          ;  10 : 210000
+1313+ 7A78              ConvLoop:             ;
+1314+ 7A78 1A                ld a,(de)        ;   7 : 1A
+1315+ 7A79 D6 30             sub 30h          ;   7 : D630
+1316+ 7A7B FE 0A             cp 10            ;   7 : FE0A
+1317+ 7A7D D0                ret nc           ;5|11 : D0
+1318+ 7A7E 13                inc de           ;   6 : 13
+1319+ 7A7F                                    ;
+1320+ 7A7F 44                ld b,h           ;   4 : 44
+1321+ 7A80 4D                ld c,l           ;   4 : 4D
+1322+ 7A81 29                add hl,hl        ;  11 : 29
+1323+ 7A82 29                add hl,hl        ;  11 : 29
+1324+ 7A83 09                add hl,bc        ;  11 : 09
+1325+ 7A84 29                add hl,hl        ;  11 : 29
+1326+ 7A85                                    ;
+1327+ 7A85 85                add a,l          ;   4 : 85
+1328+ 7A86 6F                ld l,a           ;   4 : 6F
+1329+ 7A87 30 EF             jr nc,ConvLoop   ;12|23: 30EE
+1330+ 7A89 24                inc h            ; --- : 24
+1331+ 7A8A 18 EC             jr ConvLoop      ; --- : 18EB
+1332+ 7A8C
+1333+ 7A8C
+1334+ 7A8C              ;---------------------------------------------------------------------------------
+1335+ 7A8C              ;Should be calling allow IPD even in one for when in ASCII?
+1336+ 7A8C
+1337+ 7A8C CD 9E 7A     GET_BYTE_WAIT_NUM:	CALL GET_BYTE_ALLOWIPD
+1338+ 7A8F D8           			RET C
+1339+ 7A90 FE 30        			CP '0'
+1340+ 7A92 D8           			RET C
+1341+ 7A93 FE 3A        			CP '9'+1
+1342+ 7A95 38 02        			JR C,GBWN_ISDIGIT
+1343+ 7A97 37           			SCF
+1344+ 7A98 C9           			RET
+1345+ 7A99
+1346+ 7A99 B7           GBWN_ISDIGIT:		OR A			;CCF
+1347+ 7A9A C9           			RET
+1348+ 7A9B
+1349+ 7A9B
+1350+ 7A9B              ;Print previous received byte for debugging in CIPSEND command echo mode
+1351+ 7A9B
+1352+ 7A9B CD BE 7A     GET_BYTE_ALLOWIPD_T:	CALL DiagRST16
+1353+ 7A9E
+1354+ 7A9E              ;Get a byte but allow an IPD incoming if in SIPSEND mode
+1355+ 7A9E
+1356+ 7A9E DD CB 00 46  GET_BYTE_ALLOWIPD:	BIT 0,(IX+0)
+1357+ 7AA2 28 00        			JR Z,GET_BYTE_WAIT
+1358+ 7AA4
+1359+ 7AA4              ;***TODO move IPD receive code to here
+1360+ 7AA4
+1361+ 7AA4              ;Wait quite a while or a short while to receive a byte...
+1362+ 7AA4
+1363+ 7AA4
+1364+ 7AA4 1E FF        GET_BYTE_WAIT:		LD E,255
+1365+ 7AA6 18 02        			JR GET_BYTE_2
+1366+ 7AA8
+1367+ 7AA8 1E 14        GET_BYTE:		LD E,20
+1368+ 7AAA
+1369+ 7AAA 01 3B 13     GET_BYTE_2:		LD BC,TX_CHKREADY
+1370+ 7AAD ED 78        			IN A,(C)    ;mus� zde z�stat!!!!! vynechano jen za ucely testovani v emulu
+1371+ 7AAF E6 01        			AND %00000001
+1372+ 7AB1 20 05        			JR NZ,GET_BYTE_READY
+1373+ 7AB3
+1374+ 7AB3 1D           			DEC E
+1375+ 7AB4 20 F4        			JR NZ,GET_BYTE_2
+1376+ 7AB6 37           			SCF
+1377+ 7AB7 C9           			RET				;We timed out
+1378+ 7AB8
+1379+ 7AB8              GET_BYTE_READY:
+1380+ 7AB8 3E 14        			LD A,14h			;143Bh - RX_SETBAUD
+1381+ 7ABA DB 3B        			IN A,(3Bh)			;Used as no effect on Flags for Zero from above
+1382+ 7ABC
+1383+ 7ABC B7           			OR A				;CCF
+1384+ 7ABD C9           			RET
+1385+ 7ABE
+1386+ 7ABE              ;---------------------------------------------------------------------------------
+1387+ 7ABE              ;Print a char in Inverse if Dignostics on
+1388+ 7ABE              ;***TODO really shoudl go to log or error channel.
+1389+ 7ABE
+1390+ 7ABE              DiagRST16:
+1391+ 7ABE DD CB 00 76  			BIT 6,(IX+0)
+1392+ 7AC2 C8           			RET Z
+1393+ 7AC3
+1394+ 7AC3 F5           			PUSH AF
+1395+ 7AC4 F5           			PUSH AF
+1396+ 7AC5 3E 5B        			LD A,'['
+1397+ 7AC7 D7           			RST 16
+1398+ 7AC8 F1           			POP AF
+1399+ 7AC9 FE 0A        			CP 10
+1400+ 7ACB 20 08        			JR NZ,Diag_NotLF
+terminal11_main.asm(1401): warning: value 0x5C5C is truncated to 8bit value: 0x5C
+1401+ 7ACD 3E 5C        			LD A,'\\'
+1402+ 7ACF D7           			RST 16
+1403+ 7AD0 3E 30        			LD A,'0'
+1404+ 7AD2 D7           			RST 16
+1405+ 7AD3 3E 41        			LD A,'A'
+1406+ 7AD5 D7           Diag_NotLF:		RST 16
+1407+ 7AD6 3E 5D        			LD A,']'
+1408+ 7AD8 D7           			RST 16
+1409+ 7AD9 F1           			POP AF
+1410+ 7ADA
+1411+ 7ADA C9           			RET
+1412+ 7ADB
+1413+ 7ADB              ;---------------------------------------------------------------------------------
+1414+ 7ADB              ;Keyboard scanning
+1415+ 7ADB
+1416+ 7ADB              ;/* update 21:18 2.10.2016
+1417+ 7ADB              ;
+1418+ 7ADB              ;Busy's inkey routine taken from MRS
+1419+ 7ADB              ;
+1420+ 7ADB              ;
+1421+ 7ADB              ;"# inkey 03"
+1422+ 7ADB              ;Rutina INKEY na zacitanie prave stlacenej klavesy
+1423+ 7ADB              ;...pracuje presne tak ako funkcia INKEY$ v basicu
+1424+ 7ADB              ;Vracia:ASCII-kod prave stlacenej klavesy v registri A
+1425+ 7ADB              ;ak nie je nic stlacene tak vrati nulu
+1426+ 7ADB              ;prizrak ZERO sa nastavi podla nulovosti registra A
+1427+ 7ADB              ;*/
+1428+ 7ADB 55           otherkey	defb $55
+1429+ 7ADC 55           lastkey		defb $55
+1430+ 7ADD 06 14        keywait		ld b,20
+1431+ 7ADF C5           kw2		push bc
+1432+ 7AE0 06 00        		ld b,0
+1433+ 7AE2 10 FE        kw1		djnz kw1
+1434+ 7AE4 C1           		pop bc
+1435+ 7AE5 10 F8        		djnz kw2
+1436+ 7AE7 C9           		ret
+1437+ 7AE8 00           keysound  db 0		;0=zvuk klaves ano, 1=ne
+1438+ 7AE9
+1439+ 7AE9
+1440+ 7AE9              scankeys
+1441+ 7AE9              keyboard
+1442+ 7AE9 CD DD 7A     		call keywait
+1443+ 7AEC CD 46 7B     		call inkey	;Busy's MRS solution- the best:))
+1444+ 7AEF B7           		or a
+1445+ 7AF0 20 04        		jr nz,keyb1
+1446+ 7AF2 32 DC 7A     		ld (lastkey),a
+1447+ 7AF5 C9           		ret		;if no key pressed, RETurn with A=0 and Z flag
+1448+ 7AF6              ;		jr keyboard
+1449+ 7AF6 01 00 04     keyb1		ld bc,$400
+1450+ 7AF9 0D           keyb2		dec c
+1451+ 7AFA 20 FD        		jr nz,keyb2
+1452+ 7AFC 10 FB        		djnz keyb2
+1453+ 7AFE 4F           		ld c,a
+1454+ 7AFF CD 46 7B     		call inkey
+1455+ 7B02 B9           		cp c
+1456+ 7B03 20 E4        		jr nz,keyboard
+1457+ 7B05 3A DC 7A     		ld a,(lastkey)
+1458+ 7B08 B9           		cp c
+1459+ 7B09 28 04        		jr z,keyb3
+1460+ 7B0B 3E 80        		ld a,$80
+1461+ 7B0D 18 12        		jr keyb4
+1462+ 7B0F 3A DB 7A     keyb3		ld a,(otherkey)
+1463+ 7B12 47           		ld b,a
+1464+ 7B13 AF           keyb7		xor a
+1465+ 7B14 3D           keyb5		dec a
+1466+ 7B15 20 FD        		jr nz,keyb5
+1467+ 7B17 CD 46 7B     		call inkey
+1468+ 7B1A B9           		cp c
+1469+ 7B1B 20 CC        		jr nz,keyboard
+1470+ 7B1D 10 F4        		djnz keyb7
+1471+ 7B1F 3E 01        		ld a,1
+1472+ 7B21 32 DB 7A     keyb4		ld (otherkey),a
+1473+ 7B24 79           		ld a,c
+1474+ 7B25 32 DC 7A     		ld (lastkey),a
+1475+ 7B28 F5           beep		push af
+1476+ 7B29              ;		or a			;tento or je pro rutinu MRS dulezity, jinak rutina kvici
+1477+ 7B29 CD 2E 7B     		call beepk		;beep
+1478+ 7B2C F1           		pop af
+1479+ 7B2D C9           		ret		;end of Busy's solution
+1480+ 7B2E
+1481+ 7B2E 3A E8 7A     beepk		ld a,(keysound)		;Busyho nahradni rutina,kratsi
+1482+ 7B31 B7           		or a
+1483+ 7B32 C0           		ret nz
+1484+ 7B33 3A 48 5C     		ld a,(23624)		;BORDER sys. variable
+1485+ 7B36 0F           		rrca
+1486+ 7B37 0F           		rrca
+1487+ 7B38 0F           		rrca
+1488+ 7B39 F6 18        		or #18
+1489+ 7B3B D3 FE        		out ($fe),a
+1490+ 7B3D 06 1C        		ld b,$1c
+1491+ 7B3F 10 FE        beepk1		djnz beepk1
+1492+ 7B41 E6 07        		and 7
+1493+ 7B43 D3 FE        		out ($fe),a
+1494+ 7B45 C9           		ret
+1495+ 7B46
+1496+ 7B46
+1497+ 7B46
+1498+ 7B46
+1499+ 7B46
+1500+ 7B46
+1501+ 7B46              za
+1502+ 7B46 E5           inkey	push hl                  ;Odlozenie
+1503+ 7B47 D5           	push de                  ;povodneho
+1504+ 7B48 C5           	push bc                  ;obsahu registrov
+1505+ 7B49 01 FE 7F     	ld   bc,$7ffe            ;adresa portu prvej polrady
+1506+ 7B4C 26 00        	ld   h,$00               ;h=pocitadlo klaves
+1507+ 7B4E 54           	ld   d,h                 ;d,e=pomocny buffer pre
+1508+ 7B4F 5C           	ld   e,h                 ;dve stlacene klavesy
+1509+ 7B50 2E 05        ii1	ld   l,$05               ;v kazdej polrade je 5 klaves
+1510+ 7B52 ED 78        	in   a,(c)               ;nacitanie polrady klavesnice
+1511+ 7B54 24           ii2	inc  h                   ;pre kazdy test sa pripocita +1
+1512+ 7B55 0F           	rrca                     ;test jednej klavesy z polrady
+1513+ 7B56 38 02        	jr   c,ii3               ;nestlacena - skok
+1514+ 7B58 53           	ld   d,e                 ;stlacena: zapise sa do pomocneho
+1515+ 7B59 5C           	ld   e,h                 ;buffera (tvoreneho registrom de)
+1516+ 7B5A 2D           ii3	dec  l                   ;A toto vsetko opakuj
+1517+ 7B5B 20 F7        	jr   nz,ii2              ;pre vsetky klavesy z polrady
+1518+ 7B5D CB 08        	rrc  b                   ;A toto vsetko opakuj
+1519+ 7B5F 38 EF        	jr   c,ii1               ;pre vsetky polrady klavesnice
+1520+ 7B61 7B           	ld   a,e                 ;\
+1521+ 7B62
+1522+ 7B62 FE 24        	cp   $24                 ;Prehodenie poradia klaves tak
+1523+ 7B64 20 03        	jr   nz,ii5              ;aby shifty boli v registri D
+1524+ 7B66 5A           	ld   e,d                 ;a vyznamne klavesy v E
+1525+ 7B67 16 24        	ld   d,$24               ; |
+1526+ 7B69 FE 02        ii5	cp   $02                 ; |
+1527+ 7B6B 20 03        	jr   nz,ii6              ; |
+1528+ 7B6D 5A           	ld   e,d                 ; |
+1529+ 7B6E 16 02        	ld   d,$02               ;/
+1530+ 7B70 21 92 7B     ii6	ld   hl,iinn             ;Z tabulky pre neshiftove
+1531+ 7B73 AF           	xor  a                   ;klavesy sa bude citat
+1532+ 7B74 AA           	xor  d                   ;ak nebol stlaceny ziadny shift
+1533+ 7B75 28 12        	jr   z,ii7               ;- vtedy skoc
+1534+ 7B77 21 E4 7B     	ld   hl,iiss             ;Ak bol stlaceny symbol shift
+1535+ 7B7A FE 02        	cp   $02                 ;tak sa bude citat z tejto
+1536+ 7B7C 28 0B        	jr   z,ii7               ;tabulky - vtedy skoc
+1537+ 7B7E 21 BB 7B     	ld   hl,iics             ;A na koniec je tu tabulka
+1538+ 7B81 FE 24        	cp   $24                 ;pre caps shift
+1539+ 7B83 28 04        	jr   z,ii7               ;- vtedy skoc
+1540+ 7B85 3E 01        	ld   a,$01               ;Ak su stlacene dve vyznamne
+1541+ 7B87 18 04        	jr   ii8                 ;klavesy - vtedy sa vrati kod #01
+1542+ 7B89 16 00        ii7	ld   d,$00               ;Prekodovanie kodovania klaves
+1543+ 7B8B 19           	add  hl,de               ;podla pocitadla na kod ASCII
+1544+ 7B8C 7E           	ld   a,(hl)              ;Ak nie je nic stlacene,
+1545+ 7B8D A7           ii8	and  a                   ;bude a=#00 a teda aj zero.
+1546+ 7B8E C1           	pop  bc                  ;Obnovenie
+1547+ 7B8F D1           	pop  de                  ;povodneho
+1548+ 7B90 E1           	pop  hl                  ;obsahu registrov
+1549+ 7B91 C9           	ret                      ;a koniec rutinky.
+1550+ 7B92
+1551+ 7B92 00 20 1C 6D  iinn	db   $00," ",$1c,"mnb"   ;Tabulka klaves
+1551+ 7B96 6E 62
+1552+ 7B98 0D 6C 6B 6A          db   13,"lkjh"           ;pre neshiftove klavesy
+1552+ 7B9C 68
+1553+ 7B9D 70 6F 69 75          db   "poiuy"
+1553+ 7BA1 79
+1554+ 7BA2 30 39 38 37          db   "09876"
+1554+ 7BA6 36
+1555+ 7BA7 31 32 33 34          db   "12345"
+1555+ 7BAB 35
+1556+ 7BAC 71 77 65 72          db   "qwert"
+1556+ 7BB0 74
+1557+ 7BB1 61 73 64 66          db   "asdfg"
+1557+ 7BB5 67
+1558+ 7BB6 00 7A 78 63          db   $00,"zxcv"
+1558+ 7BBA 76
+1559+ 7BBB 00 01 0E 4D  iics	db   $00,1,$0e,"MNB"   ;Tabulka klaves
+1559+ 7BBF 4E 42
+1560+ 7BC1 02 4C 4B 4A          db   $02,"LKJH"          ;pre caps shift
+1560+ 7BC5 48
+1561+ 7BC6 50 4F 49 55          db   "POIUY"
+1561+ 7BCA 59
+1562+ 7BCB 08 05 09 0B          db   $08,$05,$09,$0b,$0a ;delete,graph,right,up,down
+1562+ 7BCF 0A
+1563+ 7BD0 07 02 03 04          db   $07,$02,$03,$04,$0c ;edit,caps lock,true.v.,inv.v.,left
+1563+ 7BD4 0C
+1564+ 7BD5 51 57 45 52          db   "QWERT"
+1564+ 7BD9 54
+1565+ 7BDA 41 53 44 46          db   "ASDFG"
+1565+ 7BDE 47
+1566+ 7BDF 1F 5A 58 43          db   $1f,"ZXCV"
+1566+ 7BE3 56
+1567+ 7BE4              ;Tabulka klaves pre symbol shift, bohuzel pro MBC nutno prekopat
+1568+ 7BE4 00 06 1E 2E  iiss	db   $00,$6,$1e,".,*"  ;SPC,SS,mnb
+1568+ 7BE8 2C 2A
+1569+ 7BEA CA 3D 2B 2D          db   202,"=+-^"          ; SS+ENTER reserved on Next; TRUE VIDEO stays 3
+1569+ 7BEE 5E
+1570+ 7BEF 22 3B 7F 5D  	db   $22,";]["		;poiuy
+1570+ 7BF3 5B
+1571+ 7BF4 5F 29 28 27          db   "_)(","'","&"	;09876
+1571+ 7BF8 26
+1572+ 7BF9 21 40 23 24  	db   "!@#$%"		;12345
+1572+ 7BFD 25
+1573+ 7BFE C7 C8 C9 3C  	db   199,200,201,"<>"	;qwert	    misto 199 bylo #12
+1573+ 7C02 3E
+1574+ 7C03 7E 7C 5C 7B          db   "~|",$5C,$7B,$7D	;asdfg	    \{}
+1574+ 7C07 7D
+1575+ 7C08 1D 3A 60 3F          db   $1d,":`?/"		;CS,zxcv
+1575+ 7C0C 2F
+1576+ 7C0D              ko
+1577+ 7C0D              le      =    ko-za
+1578+ 7C0D
+1579+ 7C0D
+1580+ 7C0D
+1581+ 7C0D
+1582+ 7C0D
+1583+ 7C0D ~            /* old one, working badly
+1584+ 7C0D ~            oldkeys:		DEFB	0,0,0,0,0,0,0,0
+1585+ 7C0D ~            newkeys:		DEFB	0,0,0,0,0,0,0,0
+1586+ 7C0D ~            debkeys:		DEFB	0,0,0,0,0,0,0,0
+1587+ 7C0D ~
+1588+ 7C0D ~            scankeys:		ld	a,%01111111
+1589+ 7C0D ~            			ld hl,oldkeys			;previous scan results
+1590+ 7C0D ~            			ld de,newkeys			;new scan results
+1591+ 7C0D ~            			ld bc,debkeys			;debounced keys ( press initiated this frame )
+1592+ 7C0D ~            lp:			push af				;store A
+1593+ 7C0D ~            			ld a,(de)			;get previous scan's result
+1594+ 7C0D ~            			ld (hl),a			;store it in oldkey
+1595+ 7C0D ~            			pop af				;restore A
+1596+ 7C0D ~            			push af				;store A again
+1597+ 7C0D ~            			in a,(254)			;get key row
+1598+ 7C0D ~            			cpl				;invert bits 0 = not pressed 1 = pressed
+1599+ 7C0D ~            			ld (de),a			;store in newkeys
+1600+ 7C0D ~            			and (hl)			;and with old key
+1601+ 7C0D ~            			ex de,hl			;swap regs for xor
+1602+ 7C0D ~            			xor (hl)			;xor new key ( sets bit only when key initially pressed this scan )
+1603+ 7C0D ~            			ex de,hl			;swap regs back
+1604+ 7C0D ~            			ld (bc),a			;store in debounced keys
+1605+ 7C0D ~            			pop af				;restore A
+1606+ 7C0D ~            			inc  hl				;inc pointers
+1607+ 7C0D ~            			inc de				;inc pointers
+1608+ 7C0D ~            			inc bc				;inc pointers
+1609+ 7C0D ~            			rrca				;next keyrow
+1610+ 7C0D ~            			jr c,lp				;loop
+1611+ 7C0D ~
+1612+ 7C0D ~            			ld	de,KeyMap2		;point to new keymap
+1613+ 7C0D ~            			ld	a,(oldkeys+0)		;test  for symbol shift
+1614+ 7C0D ~            			and 2				;mask out symbol shift key
+1615+ 7C0D ~            			jr z,nsym			;if not pressed ship
+1616+ 7C0D ~            			ld a,(debkeys+0)		;remove symbol shift key
+1617+ 7C0D ~            			and 31-2			;remove symbol shift key
+1618+ 7C0D ~            			ld (debkeys+0),a		;remove symbol shift key
+1619+ 7C0D ~            			ld de,KeyMapS			;set Symbol Shift key table
+1620+ 7C0D ~            nsym:
+1621+ 7C0D ~            			ld	a,(oldkeys+7)		;test  for caps
+1622+ 7C0D ~            			and 1				;mask out caps key
+1623+ 7C0D ~            			jr z,ncap			;if not pressed ship
+1624+ 7C0D ~            			ld a,(debkeys+7)		;remove caps key
+1625+ 7C0D ~            			and 31-1			;remove caps key
+1626+ 7C0D ~            			ld (debkeys+7),a		;remove caps key
+1627+ 7C0D ~            			ld de,KeyMapC			;set Caps key table
+1628+ 7C0D ~            ncap:
+1629+ 7C0D ~
+1630+ 7C0D ~            			ld	hl,debkeys		;point to debounced keys
+1631+ 7C0D ~            			ld	b,8			;8 rows
+1632+ 7C0D ~            blp:			ld	a,(hl)			;get row
+1633+ 7C0D ~            			or a				;has it got a key pressed
+1634+ 7C0D ~            			jr nz,got1			;if so go to .got1
+1635+ 7C0D ~            			inc de				;point to next keymap row
+1636+ 7C0D ~            			inc de
+1637+ 7C0D ~            			inc de
+1638+ 7C0D ~            			inc de
+1639+ 7C0D ~            			inc de
+1640+ 7C0D ~            			inc hl				;point to next debounced row
+1641+ 7C0D ~            			djnz blp			;loop 8 rows
+1642+ 7C0D ~            			xor a				;nothing found
+1643+ 7C0D ~            			ret				;return
+1644+ 7C0D ~            got1:			rra				;get bit
+1645+ 7C0D ~            			jr c,gotit			;if set we've got our key
+1646+ 7C0D ~            			inc de				;point to next keymap
+1647+ 7C0D ~            			jr got1				;loop until we find which key it was
+1648+ 7C0D ~            gotit:			ld a,(de)			;get key ascii value
+1649+ 7C0D ~            			ret				;return
+1650+ 7C0D ~
+1651+ 7C0D ~            KeyMap2:		DEFB " ",0,"m","n","b"
+1652+ 7C0D ~            			DEFB 13,"l","k","j","h"
+1653+ 7C0D ~            			DEFB "p","o","i","u","y"
+1654+ 7C0D ~            			DEFB "0","9","8","7","6"
+1655+ 7C0D ~            			DEFB "1","2","3","4","5"
+1656+ 7C0D ~            			DEFB "q","w","e","r","t"
+1657+ 7C0D ~            			DEFB "a","s","d","f","g"
+1658+ 7C0D ~            			DEFB 0,"z","x","c","v"
+1659+ 7C0D ~
+1660+ 7C0D ~            KeyMapS:		DEFB 6,0,".",",","*"
+1661+ 7C0D ~            			DEFB 13,"=","+","-","^"
+1662+ 7C0D ~            			DEFB 34,";",0,93,91
+1663+ 7C0D ~            			DEFB "_",")","(","'","&"
+1664+ 7C0D ~            			DEFB "!","@","#","$","%"
+1665+ 7C0D ~            			DEFB 0,0,0,"<",">"
+1666+ 7C0D ~            			DEFB 126,124,92,123,125
+1667+ 7C0D ~            			DEFB 0,":",96,63,47
+1668+ 7C0D ~
+1669+ 7C0D ~            KeyMapC:		DEFB " ",0,"M","N","B"
+1670+ 7C0D ~            			DEFB 13,"L","K","J","H"
+1671+ 7C0D ~            			DEFB "P","O","I","U","Y"
+1672+ 7C0D ~            			DEFB 8,5,"8","7","6"
+1673+ 7C0D ~            			DEFB 1,2,3,4,"5"
+1674+ 7C0D ~            			DEFB "Q","W","E","R","T"
+1675+ 7C0D ~            			DEFB "A","S","D","F","G"
+1676+ 7C0D ~            			DEFB 0,"Z","X","C","V"
+1677+ 7C0D ~
+1678+ 7C0D ~            */
+1679+ 7C0D
+1680+ 7C0D              ;---------------------------------------------------------------------------------
+1681+ 7C0D
+1682+ 7C0D              ;Diagnostic routines...
+1683+ 7C0D
+1684+ 7C0D              print_regs:
+1685+ 7C0D F5           			PUSH AF
+1686+ 7C0E C5           			push BC
+1687+ 7C0F D5           			push DE
+1688+ 7C10 E5           			push HL
+1689+ 7C11
+1690+ 7C11
+1691+ 7C11 21 62 7D     			ld HL, str_HL
+1692+ 7C14 CD CC 7C     			call print
+1693+ 7C17 E1           			pop hl
+1694+ 7C18 CD FB 7C     			call prt_hex_16
+1695+ 7C1B CD DF 7C     			call print_newline
+1696+ 7C1E
+1697+ 7C1E 21 6A 7D     			ld HL, str_DE
+1698+ 7C21 CD CC 7C     			call print
+1699+ 7C24 E1           			pop hl
+1700+ 7C25 CD FB 7C     			call prt_hex_16
+1701+ 7C28 CD DF 7C     			call print_newline
+1702+ 7C2B
+1703+ 7C2B 21 72 7D     			ld HL, str_BC
+1704+ 7C2E CD CC 7C     			call print
+1705+ 7C31 E1           			pop hl
+1706+ 7C32 CD FB 7C     			call prt_hex_16
+1707+ 7C35 CD DF 7C     			call print_newline
+1708+ 7C38
+1709+ 7C38 21 7A 7D     			ld HL, str_ACC
+1710+ 7C3B CD CC 7C     			call print
+1711+ 7C3E F1           			pop af
+1712+ 7C3F 6F           			ld L,a
+1713+ 7C40 CD 00 7D     			call prt_hex
+1714+ 7C43 CD DF 7C     			call print_newline
+1715+ 7C46
+1716+ 7C46 18 1C        			JR seperate
+1717+ 7C48
+1718+ 7C48 CD DF 7C     print_baud:		CALL print_newline
+1719+ 7C4B
+1720+ 7C4B 21 82 7D     			LD HL, str_BAUD
+1721+ 7C4E CD CC 7C     			CALL print
+1722+ 7C51
+1723+ 7C51 2A B5 83     			LD HL,(CURBAUD)		;Index into 8 long string lookup table
+1724+ 7C54 11 A6 80     			LD DE,BaudTable
+1725+ 7C57                      IFDEF ZXNEXT
+1726+ 7C57 29                                   add hl,hl       ; index * 12 for compact display strings
+1727+ 7C58 29                                   add hl,hl
+1728+ 7C59 44                                   ld b,h
+1729+ 7C5A 4D                                   ld c,l
+1730+ 7C5B 29                                   add hl,hl
+1731+ 7C5C 09                                   add hl,bc
+1732+ 7C5D                      ELSE
+1733+ 7C5D ~                                    add hl,hl
+1734+ 7C5D ~                                    add hl,hl
+1735+ 7C5D ~                                    add hl,hl
+1736+ 7C5D ~                                    add hl,hl
+1737+ 7C5D                      ENDIF
+1738+ 7C5D 19           			ADD HL,DE		;and add base address
+1739+ 7C5E CD CC 7C     			CALL print
+1740+ 7C61
+1741+ 7C61 CD DF 7C     			CALL print_newline
+1742+ 7C64
+1743+ 7C64 21 EB 7D     seperate:		ld HL, str_separator
+1744+ 7C67 CD CC 7C     			call print
+1745+ 7C6A
+1746+ 7C6A C9           			ret
+1747+ 7C6B
+1748+ 7C6B              ;Create a decimal string from number in HL at DE
+1749+ 7C6B
+1750+ 7C6B DD CB 00 BE  string_dec:		res 7,(IX+0)		;Leading zero suppression
+1751+ 7C6F 01 10 27     			ld bc,10000
+1752+ 7C72 CD 8D 7C     			call string_dl
+1753+ 7C75 01 E8 03     			ld bc,1000
+1754+ 7C78 CD 8D 7C     			call string_dl
+1755+ 7C7B 01 64 00     			ld bc,100
+1756+ 7C7E CD 8D 7C     			call string_dl
+1757+ 7C81 01 0A 00     			ld bc,10
+1758+ 7C84 CD 8D 7C     			call string_dl
+1759+ 7C87 7D           			ld a,l
+1760+ 7C88 C6 30        			add a,'0'
+1761+ 7C8A 12           			LD (DE),A
+1762+ 7C8B 13           			INC DE
+1763+ 7C8C C9           			RET
+1764+ 7C8D
+1765+ 7C8D 3E 2F        string_dl:		ld a,'0'-1
+1766+ 7C8F
+1767+ 7C8F 3C           string_lp2:		inc a
+1768+ 7C90 B7           			or a
+1769+ 7C91 ED 42        			sbc hl,bc
+1770+ 7C93 30 FA        			jr nc,string_lp2
+1771+ 7C95 09           			add hl,bc
+1772+ 7C96 FE 30        			CP '0'
+1773+ 7C98 28 04        			JR Z,string_store
+1774+ 7C9A
+1775+ 7C9A DD CB 00 FE  			SET 7,(IX+0)		;Had something other than zero
+1776+ 7C9E
+1777+ 7C9E DD CB 00 7E  string_store:		BIT 7,(IX+0)		;Test if still leading zeros
+1778+ 7CA2 C8           			RET Z
+1779+ 7CA3 12           			LD (DE),A		;If not store it
+1780+ 7CA4 13           			INC DE
+1781+ 7CA5 C9           			RET
+1782+ 7CA6
+1783+ 7CA6              ;---------------------------------------------
+1784+ 7CA6
+1785+ 7CA6 CD 6B 0D     openscreen:            call #0D6B
+1786+ 7CA9 3E 02                               ld a,2
+1787+ 7CAB CD 01 16                            call #1601
+1788+ 7CAE 3A 88 5C     ui_configure           ld a,(23688)
+1789+ 7CB1 B7                                  or a
+1790+ 7CB2 3E 20                               ld a,32
+1791+ 7CB4 20 08                               jr nz,ui_set_width
+1792+ 7CB6 3A 3B 5C                            ld a,(23611)
+1793+ 7CB9 E6 10                               and 16
+1794+ 7CBB 87                                  add a,a
+1795+ 7CBC C6 20                               add a,32
+1796+ 7CBE 32 4E 6E     ui_set_width           ld (ui_columns),a
+1797+ 7CC1 87                                  add a,a
+1798+ 7CC2 3D                                  dec a
+1799+ 7CC3 32 4F 6E                            ld (ui_capacity),a
+1800+ 7CC6 C9                                  ret
+1801+ 7CC7
+1802+ 7CC7 E1           sprint:			pop	hl
+1803+ 7CC8 CD CC 7C     			call print
+1804+ 7CCB E9           			jp (hl)
+1805+ 7CCC
+1806+ 7CCC              print:
+1807+ 7CCC 3E FF        			ld a,255	; suppress ROM scroll? before first and every string byte
+1808+ 7CCE 32 8C 5C     			ld (23692),a
+1809+ 7CD1 7E           			ld	a,(hl)
+1810+ 7CD2 23           			inc hl
+1811+ 7CD3 B7           			or a
+1812+ 7CD4 C8           			ret z
+1813+ 7CD5 CB 7F        			bit 7,a
+1814+ 7CD7 C0           			ret nz
+1815+ 7CD8 FE 0A        			cp 10			;Suppress stray LF
+1816+ 7CDA 28 F0        			jr z,print
+1817+ 7CDC D7           			rst 16
+1818+ 7CDD 18 ED        			jr print
+1819+ 7CDF
+1820+ 7CDF 21 02 7E     print_newline:		ld hl,newline
+1821+ 7CE2 CD CC 7C     			call print
+1822+ 7CE5 C9           			ret
+1823+ 7CE6
+1824+ 7CE6 30 31 32 33  hextab:			DEFM	"0123456789ABCDEF"
+1824+ 7CEA 34 35 36 37
+1824+ 7CEE 38 39 41 42
+1824+ 7CF2 43 44 45 46
+1825+ 7CF6
+1826+ 7CF6 3E 20        space:			ld	a,' '
+1827+ 7CF8 C3 10 00     			jp 16
+1828+ 7CFB
+1829+ 7CFB 7C           prt_hex_16:		ld	a,h
+1830+ 7CFC CD 00 7D     			call prt_hex
+1831+ 7CFF 7D           			ld a,l
+1832+ 7D00
+1833+ 7D00 F5           prt_hex:		push af
+1834+ 7D01 1F           			rra
+1835+ 7D02 1F           			rra
+1836+ 7D03 1F           			rra
+1837+ 7D04 1F           			rra
+1838+ 7D05 CD 09 7D     			call prt_hex_4
+1839+ 7D08 F1           			pop af
+1840+ 7D09
+1841+ 7D09 E5           prt_hex_4:		push hl
+1842+ 7D0A E6 0F        			and	15
+1843+ 7D0C C6 E6        			add a,hextab&255
+1844+ 7D0E 6F           			ld l,a
+1845+ 7D0F CE 7C        			adc a,hextab/256
+1846+ 7D11 95           			sub l
+1847+ 7D12 67           			ld h,a
+1848+ 7D13 7E           			ld a,(hl)
+1849+ 7D14 E1           			pop hl
+1850+ 7D15 C3 10 00     			jp 16
+1851+ 7D18
+1852+ 7D18              prt_dec:
+1853+ 7D18 01 10 27     			ld bc,10000
+1854+ 7D1B CD 36 7D     			call dl
+1855+ 7D1E 01 E8 03     			ld bc,1000
+1856+ 7D21 CD 36 7D     			call dl
+1857+ 7D24 01 64 00     			ld bc,100
+1858+ 7D27 CD 36 7D     			call dl
+1859+ 7D2A 01 0A 00     			ld bc,10
+1860+ 7D2D CD 36 7D     			call dl
+1861+ 7D30 7D           			ld a,l
+1862+ 7D31 C6 30        			add a,'0'
+1863+ 7D33 C3 10 00     			jp 16
+1864+ 7D36
+1865+ 7D36 3E 2F        dl:			ld a,'0'-1
+1866+ 7D38
+1867+ 7D38 3C           lp2:			inc a
+1868+ 7D39 B7           			or a
+1869+ 7D3A ED 42        			sbc hl,bc
+1870+ 7D3C 30 FA        			jr nc,lp2
+1871+ 7D3E 09           			add hl,bc
+1872+ 7D3F C3 10 00     			jp 16
+1873+ 7D42
+1874+ 7D42 00 01 02 03  Line1:		DEFB		0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+1874+ 7D46 04 05 06 07
+1874+ 7D4A 08 09 0A 0B
+1874+ 7D4E 0C 0D 0E 0F
+1875+ 7D52 10 11 12 13  Line2:		DEFB		16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+1875+ 7D56 14 15 16 17
+1875+ 7D5A 18 19 1A 1B
+1875+ 7D5E 1C 1D 1E 1F
+1876+ 7D62
+1877+ 7D62 48 4C 20 20  str_HL:		DEFM "HL   : "
+1877+ 7D66 20 3A 20
+1878+ 7D69 00           		DEFB 0
+1879+ 7D6A
+1880+ 7D6A 44 45 20 20  str_DE:		DEFM "DE   : "
+1880+ 7D6E 20 3A 20
+1881+ 7D71 00           		DEFB 0
+1882+ 7D72
+1883+ 7D72 42 43 20 20  str_BC:		DEFM "BC   : "
+1883+ 7D76 20 3A 20
+1884+ 7D79 00           		DEFB 0
+1885+ 7D7A
+1886+ 7D7A 41 43 43 20  str_ACC:	DEFM "ACC  : "
+1886+ 7D7E 20 3A 20
+1887+ 7D81 00           		DEFB 0
+1888+ 7D82
+1889+ 7D82 0D           str_BAUD:	DEFB 13
+1890+ 7D83 42 41 55 44  		DEFB "BAUD : "
+1890+ 7D87 20 3A 20
+1891+ 7D8A 00           		DEFB 0
+1892+ 7D8B
+1893+ 7D8B 5B 54 69 6D  str_TIMEOUT:	DEFB "[Timeout on send - buffer lost]"
+1893+ 7D8F 65 6F 75 74
+1893+ 7D93 20 6F 6E 20
+1893+ 7D97 73 65 6E 64
+1893+ 7D9B 20 2D 20 62
+1893+ 7D9F 75 66 66 65
+1893+ 7DA3 72 20 6C 6F
+1893+ 7DA7 73 74 5D
+1894+ 7DAA 00           		DEFB 0
+1895+ 7DAB
+1896+ 7DAB 5B 54 69 6D  str_TIMEOUTCS:	DEFB "[Timeout on CIPSEND - sync lost]"
+1896+ 7DAF 65 6F 75 74
+1896+ 7DB3 20 6F 6E 20
+1896+ 7DB7 43 49 50 53
+1896+ 7DBB 45 4E 44 20
+1896+ 7DBF 2D 20 73 79
+1896+ 7DC3 6E 63 20 6C
+1896+ 7DC7 6F 73 74 5D
+1897+ 7DCB 00           		DEFB 0
+1898+ 7DCC
+1899+ 7DCC 5B 54 69 6D  str_TIMEOUTRX:	DEFB "[Timeout on recv - bytes lost]"
+1899+ 7DD0 65 6F 75 74
+1899+ 7DD4 20 6F 6E 20
+1899+ 7DD8 72 65 63 76
+1899+ 7DDC 20 2D 20 62
+1899+ 7DE0 79 74 65 73
+1899+ 7DE4 20 6C 6F 73
+1899+ 7DE8 74 5D
+1900+ 7DEA 00           		DEFB 0
+1901+ 7DEB
+1902+ 7DEB 2D 2D 2D 2D  str_separator: 	DEFM "---------------------"
+1902+ 7DEF 2D 2D 2D 2D
+1902+ 7DF3 2D 2D 2D 2D
+1902+ 7DF7 2D 2D 2D 2D
+1902+ 7DFB 2D 2D 2D 2D
+1902+ 7DFF 2D
+1903+ 7E00 0D 00        		DEFB 13,0
+1904+ 7E02
+1905+ 7E02 0D 00        newline:	DEFB 13,0
+1906+ 7E04
+1907+ 7E04              Welcome:
+1908+ 7E04                      IFDEF ZXNEXT
+1909+ 7E04 5A 58 20 4E                  DEFM "ZX Next WiFi Terminal, ver 1.1"
+1909+ 7E08 65 78 74 20
+1909+ 7E0C 57 69 46 69
+1909+ 7E10 20 54 65 72
+1909+ 7E14 6D 69 6E 61
+1909+ 7E18 6C 2C 20 76
+1909+ 7E1C 65 72 20 31
+1909+ 7E20 2E 31
+1910+ 7E22                      ELSE
+1911+ 7E22 ~                            DEFM "ELMB Wifi Terminal, version 1.1"
+1912+ 7E22                      ENDIF
+1913+ 7E22 0D           		DEFB 13
+1914+ 7E23 62 61 73 65  		DEFM "based on ZX Next uart by:"
+1914+ 7E27 64 20 6F 6E
+1914+ 7E2B 20 5A 58 20
+1914+ 7E2F 4E 65 78 74
+1914+ 7E33 20 75 61 72
+1914+ 7E37 74 20 62 79
+1914+ 7E3B 3A
+1915+ 7E3C 0D           		DEFB 13
+1916+ 7E3D 56 2E 54 72  		DEFM "V.Trucco, T.Gilberts, J.Bagley"
+1916+ 7E41 75 63 63 6F
+1916+ 7E45 2C 20 54 2E
+1916+ 7E49 47 69 6C 62
+1916+ 7E4D 65 72 74 73
+1916+ 7E51 2C 20 4A 2E
+1916+ 7E55 42 61 67 6C
+1916+ 7E59 65 79
+1917+ 7E5B 0D           		DEFB 13
+1918+ 7E5C 61 64 61 70  		DEFM "adapted by: LMN, Hood, 2020-26"
+1918+ 7E60 74 65 64 20
+1918+ 7E64 62 79 3A 20
+1918+ 7E68 4C 4D 4E 2C
+1918+ 7E6C 20 48 6F 6F
+1918+ 7E70 64 2C 20 32
+1918+ 7E74 30 32 30 2D
+1918+ 7E78 32 36
+1919+ 7E7A 0D           		DEFB 13
+1920+ 7E7B 0D           		DEFB 13
+1921+ 7E7C 45 44 49 54  		DEFM "EDIT-       change BAUD rate"
+1921+ 7E80 2D 20 20 20
+1921+ 7E84 20 20 20 20
+1921+ 7E88 63 68 61 6E
+1921+ 7E8C 67 65 20 42
+1921+ 7E90 41 55 44 20
+1921+ 7E94 72 61 74 65
+1922+ 7E98 0D           		DEFB 13
+1923+ 7E99 43 41 50 53  		DEFM "CAPS LOCK-  ON/OFF (default ON)"
+1923+ 7E9D 20 4C 4F 43
+1923+ 7EA1 4B 2D 20 20
+1923+ 7EA5 4F 4E 2F 4F
+1923+ 7EA9 46 46 20 28
+1923+ 7EAD 64 65 66 61
+1923+ 7EB1 75 6C 74 20
+1923+ 7EB5 4F 4E 29
+1924+ 7EB8 0D           		DEFB 13
+1925+ 7EB9 54 52 55 45  		DEFM "TRUE VIDEO- Debug CIPSEND/IPD"
+1925+ 7EBD 20 56 49 44
+1925+ 7EC1 45 4F 2D 20
+1925+ 7EC5 44 65 62 75
+1925+ 7EC9 67 20 43 49
+1925+ 7ECD 50 53 45 4E
+1925+ 7ED1 44 2F 49 50
+1925+ 7ED5 44
+1926+ 7ED6 0D           		DEFB 13
+1927+ 7ED7 49 4E 56 20  		DEFM "INV VIDEO-  CIPSEND mode ON/OFF"
+1927+ 7EDB 56 49 44 45
+1927+ 7EDF 4F 2D 20 20
+1927+ 7EE3 43 49 50 53
+1927+ 7EE7 45 4E 44 20
+1927+ 7EEB 6D 6F 64 65
+1927+ 7EEF 20 4F 4E 2F
+1927+ 7EF3 4F 46 46
+1928+ 7EF6 0D           		DEFB 13
+1929+ 7EF7              ;		DEFM "GRAPHICS - EMIT EOT (1Ah)"
+1930+ 7EF7              ;		DEFB 13
+1931+ 7EF7 53 53 2B 53                  DEFM "SS+SPACE-   exit, WiFi ON"
+1931+ 7EFB 50 41 43 45
+1931+ 7EFF 2D 20 20 20
+1931+ 7F03 65 78 69 74
+1931+ 7F07 2C 20 57 69
+1931+ 7F0B 46 69 20 4F
+1931+ 7F0F 4E
+1932+ 7F10 0D           		DEFB 13
+1933+ 7F11              ;		DEFM "Start with -f option to find ESP"
+1934+ 7F11              ;		DEFB 13
+1935+ 7F11 55 50 2F 44  		defm "UP/DOWN-    command history"   ;MB03
+1935+ 7F15 4F 57 4E 2D
+1935+ 7F19 20 20 20 20
+1935+ 7F1D 63 6F 6D 6D
+1935+ 7F21 61 6E 64 20
+1935+ 7F25 68 69 73 74
+1935+ 7F29 6F 72 79
+1936+ 7F2C 0D           		defb 13
+1937+ 7F2D 4C 45 46 54  		defm "LEFT/RIGHT- edit command"
+1937+ 7F31 2F 52 49 47
+1937+ 7F35 48 54 2D 20
+1937+ 7F39 65 64 69 74
+1937+ 7F3D 20 63 6F 6D
+1937+ 7F41 6D 61 6E 64
+1938+ 7F45 0D           		defb 13
+1939+ 7F46 43 53 2B 53  		defm "CS+SS-      show help"
+1939+ 7F4A 53 2D 20 20
+1939+ 7F4E 20 20 20 20
+1939+ 7F52 73 68 6F 77
+1939+ 7F56 20 68 65 6C
+1939+ 7F5A 70
+1940+ 7F5B 0D           		defb 13
+1941+ 7F5C 53 53 2B 51  		defm "SS+Q-       clear history"
+1941+ 7F60 2D 20 20 20
+1941+ 7F64 20 20 20 20
+1941+ 7F68 63 6C 65 61
+1941+ 7F6C 72 20 68 69
+1941+ 7F70 73 74 6F 72
+1941+ 7F74 79
+1942+ 7F75 0D           		defb 13
+1943+ 7F76 53 53 2B 57  		defm "SS+W-       clear command"
+1943+ 7F7A 2D 20 20 20
+1943+ 7F7E 20 20 20 20
+1943+ 7F82 63 6C 65 61
+1943+ 7F86 72 20 63 6F
+1943+ 7F8A 6D 6D 61 6E
+1943+ 7F8E 64
+1944+ 7F8F 0D           		defb 13
+1945+ 7F90 53 53 2B 45  		defm "SS+E-       BAUD 115200"
+1945+ 7F94 2D 20 20 20
+1945+ 7F98 20 20 20 20
+1945+ 7F9C 42 41 55 44
+1945+ 7FA0 20 31 31 35
+1945+ 7FA4 32 30 30
+1946+ 7FA7 0D           		defb 13
+1947+ 7FA8              ;		defm "Hood's ver.0.3-can send bytes"
+1948+ 7FA8              ;		defb 13
+1949+ 7FA8              ;		defm "version: 1.0"
+1950+ 7FA8
+1951+ 7FA8 ~            /*	IFDEF	mb03plus
+1952+ 7FA8 ~            		defm "MB03+"
+1953+ 7FA8 ~            	ENDIF
+1954+ 7FA8 ~            	IFDEF	mb03plus_setup
+1955+ 7FA8 ~            		defm "MB03+"
+1956+ 7FA8 ~            	ENDIF
+1957+ 7FA8 ~            	IFDEF	eLeMeNtZX
+1958+ 7FA8 ~            		defm "eLeMeNt ZX"
+1959+ 7FA8 ~            	ENDIF
+1960+ 7FA8 ~            	IFDEF	eLeMeNtZX_setup
+1961+ 7FA8 ~            		defm "eLeMeNt ZX"
+1962+ 7FA8 ~            	ENDIF
+1963+ 7FA8 ~            */
+1964+ 7FA8
+1965+ 7FA8 00           		DEFB 0
+1966+ 7FA9
+1967+ 7FA9 0D           wifion		defb 13
+1968+ 7FAA 57 69 46 69  		defm "WiFi is ON"
+1968+ 7FAE 20 69 73 20
+1968+ 7FB2 4F 4E
+1969+ 7FB4 0D 00        		defb 13,0
+1970+ 7FB6 ~            /*Hood, ZX Next related
+1971+ 7FB6 ~            Searching:
+1972+ 7FB6 ~            		DEFM "Started with -f option."
+1973+ 7FB6 ~            		DEFB 13
+1974+ 7FB6 ~            		DEFM "Finding ESP"
+1975+ 7FB6 ~            		DEFB 13
+1976+ 7FB6 ~            		DEFM "(This may take some time)"
+1977+ 7FB6 ~            		DEFB 13
+1978+ 7FB6 ~            		DEFB 0
+1979+ 7FB6 ~
+1980+ 7FB6 ~            Timing:
+1981+ 7FB6 ~            		DEFM "Timing "
+1982+ 7FB6 ~            		DEFB 0
+1983+ 7FB6 ~
+1984+ 7FB6 ~            Prescaler:	DEFM " applying prescaler "
+1985+ 7FB6 ~            		DEFB	0
+1986+ 7FB6 ~            */
+1987+ 7FB6
+1988+ 7FB6
+1989+ 7FB6                      IFDEF ZXNEXT
+1990+ 7FB6              NextBaudPrescale
+1991+ 7FB6 F3 00 F8 00          dw 243,248,256,260,269,278,286,234 ; 115200
+1991+ 7FBA 00 01 04 01
+1991+ 7FBE 0D 01 16 01
+1991+ 7FC2 1E 01 EA 00
+1992+ 7FC6 E6 01 F0 01          dw 486,496,512,521,538,556,573,469 ; 57600
+1992+ 7FCA 00 02 09 02
+1992+ 7FCE 1A 02 2C 02
+1992+ 7FD2 3D 02 D5 01
+1993+ 7FD6 D9 02 E8 02          dw 729,744,767,781,807,833,859,703 ; 38400
+1993+ 7FDA FF 02 0D 03
+1993+ 7FDE 27 03 41 03
+1993+ 7FE2 5B 03 BF 02
+1994+ 7FE6 80 03 92 03          dw 896,914,943,960,992,1024,1056,864 ; 31250
+1994+ 7FEA AF 03 C0 03
+1994+ 7FEE E0 03 00 04
+1994+ 7FF2 20 04 60 03
+1995+ 7FF6 B2 05 D0 05          dw 1458,1488,1535,1563,1615,1667,1719,1406 ; 19200
+1995+ 7FFA FF 05 1B 06
+1995+ 7FFE 4F 06 83 06
+1995+ 8002 B7 06 7E 05
+1996+ 8006 65 0B A0 0B          dw 2917,2976,3069,3125,3229,3333,3438,2813 ; 9600
+1996+ 800A FD 0B 35 0C
+1996+ 800E 9D 0C 05 0D
+1996+ 8012 6E 0D FD 0A
+1997+ 8016 C9 16 40 17          dw 5833,5952,6138,6250,6458,6667,6875,5625 ; 4800
+1997+ 801A FA 17 6A 18
+1997+ 801E 3A 19 0B 1A
+1997+ 8022 DB 1A F9 15
+1998+ 8026 93 2D 81 2E          dw 11667,11905,12277,12500,12917,13333,13750,11250 ; 2400
+1998+ 802A F5 2F D4 30
+1998+ 802E 75 32 15 34
+1998+ 8032 B6 35 F2 2B
+1999+ 8036 7A 00 7C 00          dw 122,124,128,130,135,139,143,117 ; 230400
+1999+ 803A 80 00 82 00
+1999+ 803E 87 00 8B 00
+1999+ 8042 8F 00 75 00
+2000+ 8046 3D 00 3E 00          dw 61,62,64,65,67,69,72,59 ; 460800
+2000+ 804A 40 00 41 00
+2000+ 804E 43 00 45 00
+2000+ 8052 48 00 3B 00
+2001+ 8056 31 00 32 00          dw 49,50,51,52,54,56,57,47 ; 576000
+2001+ 805A 33 00 34 00
+2001+ 805E 36 00 38 00
+2001+ 8062 39 00 2F 00
+2002+ 8066 1E 00 1F 00          dw 30,31,32,33,34,35,36,29 ; 921600
+2002+ 806A 20 00 21 00
+2002+ 806E 22 00 23 00
+2002+ 8072 24 00 1D 00
+2003+ 8076 18 00 19 00          dw 24,25,26,26,27,28,29,23 ; 1152000
+2003+ 807A 1A 00 1A 00
+2003+ 807E 1B 00 1C 00
+2003+ 8082 1D 00 17 00
+2004+ 8086 13 00 13 00          dw 19,19,20,20,21,21,22,18 ; 1500000
+2004+ 808A 14 00 14 00
+2004+ 808E 15 00 15 00
+2004+ 8092 16 00 12 00
+2005+ 8096 0E 00 0E 00          dw 14,14,15,15,16,16,17,14 ; 2000000
+2005+ 809A 0F 00 0F 00
+2005+ 809E 10 00 10 00
+2005+ 80A2 11 00 0E 00
+2006+ 80A6                      ENDIF
+2007+ 80A6              BaudTable:			;All 8 bytes long for simple mult. Useful now we have higher speeds.
+2008+ 80A6 31 31 35 5F  	DC "115_200     " ; 0
+2008+ 80AA 32 30 30 20
+2008+ 80AE 20 20 20 A0
+2009+ 80B2
+2010+ 80B2 35 37 5F 36  	DC "57_600      " ; 1
+2010+ 80B6 30 30 20 20
+2010+ 80BA 20 20 20 A0
+2011+ 80BE
+2012+ 80BE 33 38 5F 34  	DC "38_400      " ; 2
+2012+ 80C2 30 30 20 20
+2012+ 80C6 20 20 20 A0
+2013+ 80CA
+2014+ 80CA 33 31 5F 32  	DC "31_250      " ; 3
+2014+ 80CE 35 30 20 20
+2014+ 80D2 20 20 20 A0
+2015+ 80D6
+2016+ 80D6 31 39 5F 32  	DC "19_200      " ; 4
+2016+ 80DA 30 30 20 20
+2016+ 80DE 20 20 20 A0
+2017+ 80E2
+2018+ 80E2 39 5F 36 30  	DC "9_600       " ; 5
+2018+ 80E6 30 20 20 20
+2018+ 80EA 20 20 20 A0
+2019+ 80EE
+2020+ 80EE 34 5F 38 30  	DC "4_800       " ; 6
+2020+ 80F2 30 20 20 20
+2020+ 80F6 20 20 20 A0
+2021+ 80FA
+2022+ 80FA 32 5F 34 30  	DC "2_400       " ; 7
+2022+ 80FE 30 20 20 20
+2022+ 8102 20 20 20 A0
+2023+ 8106
+2024+ 8106 32 33 30 5F  	DC "230_400     " ; 8
+2024+ 810A 34 30 30 20
+2024+ 810E 20 20 20 A0
+2025+ 8112
+2026+ 8112 34 36 30 5F  	DC "460_800     " ; 9
+2026+ 8116 38 30 30 20
+2026+ 811A 20 20 20 A0
+2027+ 811E
+2028+ 811E 35 37 36 5F  	DC "576_000     " ; 10
+2028+ 8122 30 30 30 20
+2028+ 8126 20 20 20 A0
+2029+ 812A
+2030+ 812A 39 32 31 5F  	DC "921_600     " ; 11
+2030+ 812E 36 30 30 20
+2030+ 8132 20 20 20 A0
+2031+ 8136
+2032+ 8136 31 5F 31 35  	DC "1_152_000   " ; 12
+2032+ 813A 32 5F 30 30
+2032+ 813E 30 20 20 A0
+2033+ 8142
+2034+ 8142 31 5F 35 30  	DC "1_500_000   " ; 13
+2034+ 8146 30 5F 30 30
+2034+ 814A 30 20 20 A0
+2035+ 814E
+2036+ 814E 32 5F 30 30  	DC "2_000_000   " ; 14
+2036+ 8152 30 5F 30 30
+2036+ 8156 30 20 20 A0
+2037+ 815A
+2038+ 815A                      IFNDEF ZXNEXT
+2039+ 815A ~            	DC "2_304_000       " ; 15
+2040+ 815A ~
+2041+ 815A ~            	DC "3_456_000       " ; 16
+2042+ 815A ~
+2043+ 815A ~            	DC "4_608_000       " ; 17
+2044+ 815A ~
+2045+ 815A ~            	DC "5_760_000       " ; 18
+2046+ 815A ~
+2047+ 815A ~            	DC "6_912_000       " ; 19
+2048+ 815A ~
+2049+ 815A ~            	DC "8_064_000       " ; 20
+2050+ 815A ~
+2051+ 815A ~            	DC "9_216_000       " ; 21
+2052+ 815A ~
+2053+ 815A ~            	DC "10_368_000      " ; 22
+2054+ 815A ~            ;	DEFW 0
+2055+ 815A ~            	DC "11_520_000      " ; 23
+2056+ 815A ~            ;	DEFW 0
+2057+ 815A ~
+2058+ 815A                      ENDIF
+2059+ 815A ~            /* not needed for element of mb wifi
+2060+ 815A ~            BaudPrescale:
+2061+ 815A ~
+2062+ 815A ~            	DEFW 243,248,256,260,269,278,286,234 ; Was 0 - 115200 adjust for 0-7
+2063+ 815A ~            	DEFW 486,496,512,521,538,556,573,469 ; 56k
+2064+ 815A ~            	DEFW 729,744,767,781,807,833,859,703 ; 38k
+2065+ 815A ~            	DEFW 896,914,943,960,992,1024,1056,864 ; 31250 (MIDI)
+2066+ 815A ~            	DEFW 1458,1488,1535,1563,1615,1667,1719,1406 ; 19200
+2067+ 815A ~            	DEFW 2917,2976,3069,3125,3229,3333,3438,2813 ; 9600
+2068+ 815A ~            	DEFW 5833,5952,6138,6250,6458,6667,6875,5625 ; 4800
+2069+ 815A ~            	DEFW 11667,11905,12277,12500,12917,13333,13750,11250 ; 2400
+2070+ 815A ~            	DEFW 122,124,128,130,135,139,143,117 ; 230400 -8
+2071+ 815A ~            	DEFW 61,62,64,65,67,69,72,59 ;460800 -9
+2072+ 815A ~            	DEFW 49,50,51,52,54,56,57,47 ;576000 -10
+2073+ 815A ~            	DEFW 30,31,32,33,34,35,36,29 ;921600 -11
+2074+ 815A ~            	DEFW 24,25,26,26,27,28,29,23 ;1152000 -12
+2075+ 815A ~            	DEFW 19,19,20,20,21,21,22,18 ;1500000 -13
+2076+ 815A ~            	DEFW 14,14,15,15,16,16,17,14 ;2000000 -14
+2077+ 815A ~
+2078+ 815A ~            ;Cannot go to 1200 as requires a pre-scaler greater than the 14 bit register available.
+2079+ 815A ~            ;For info on why the faster rates will be less accurate and reliable...
+2080+ 815A ~            ;https://arduino.stackexchange.com/questions/296/how-high-of-a-baud-rate-can-i-go-without-errors
+2081+ 815A ~            */
+2082+ 815A
+2083+ 815A
+2084+ 815A 0D           SYNERR		DEFB 13
+2085+ 815B 53 59 4E 54  		DEFM "SYNTAX ERROR, try again.."
+2085+ 815F 41 58 20 45
+2085+ 8163 52 52 4F 52
+2085+ 8167 2C 20 74 72
+2085+ 816B 79 20 61 67
+2085+ 816F 61 69 6E 2E
+2085+ 8173 2E
+2086+ 8174 0D 00        		DEFB 13,0
+2087+ 8176
+2088+ 8176 0D           CIPON:		DEFB 13
+2089+ 8177 43 49 50 53  		DEFM "CIPSEND ON (ECHO OFF)"
+2089+ 817B 45 4E 44 20
+2089+ 817F 4F 4E 20 28
+2089+ 8183 45 43 48 4F
+2089+ 8187 20 4F 46 46
+2089+ 818B 29
+2090+ 818C 0D 00        		DEFB 13,0
+2091+ 818E
+2092+ 818E 0D           CIPOFF:		DEFB 13
+2093+ 818F 43 49 50 53  		DEFM "CIPSEND OFF"
+2093+ 8193 45 4E 44 20
+2093+ 8197 4F 46 46
+2094+ 819A 0D 00        		DEFB 13,0
+2095+ 819C
+2096+ 819C 0D           ANSION:		DEFB 13
+2097+ 819D 41 4E 53 49  		DEFM "ANSI ON"
+2097+ 81A1 20 4F 4E
+2098+ 81A4 0D 00        		DEFB 13,0
+2099+ 81A6
+2100+ 81A6 0D           ANSIOFF:	DEFB 13
+2101+ 81A7 41 4E 53 49  		DEFM "ANSI OFF"
+2101+ 81AB 20 4F 46 46
+2102+ 81AF 0D 00        		DEFB 13,0
+2103+ 81B1
+2104+ 81B1 5B 49 50 44  IPDABORT:	DEFM "[IPD,abort]"
+2104+ 81B5 2C 61 62 6F
+2104+ 81B9 72 74 5D
+2105+ 81BC 00           		DEFB 0
+2106+ 81BD
+2107+ 81BD 41 54 45 30  ATE0:		DEFM "ATE0"	; Need to ensure no local echo in CIPSEND mode
+2108+ 81C1 0D 0A 00     		DEFB 13,10,0
+2109+ 81C4
+2110+ 81C4 41 54 2B 55  DEFBAUD:	DEFM "AT+UART=115200,8,1,0,0"
+2110+ 81C8 41 52 54 3D
+2110+ 81CC 31 31 35 32
+2110+ 81D0 30 30 2C 38
+2110+ 81D4 2C 31 2C 30
+2110+ 81D8 2C 30
+2111+ 81DA 0D 0A 00     		DEFB 13,10,0
+2112+ 81DD
+2113+ 81DD              ;Response Messages - these are the things we need to wait for to confirm things
+2114+ 81DD
+2115+ 81DD              ;**TODO convert from inline
+2116+ 81DD              ;
+2117+ 81DD 49 50 44 2C  IPDSTART:	DEFM "IPD,"		; May not match this one as inline allows us to avoid check for IPD IN an IPD!
+2118+ 81E1 00           		DEFB 0
+2119+ 81E2
+2120+ 81E2 4F 4B        CIPSTART:	DEFM "OK"		; Sip send skip
+2121+ 81E4 0D 0A 3E 00  		DEFB 13,10,'>',0
+2122+ 81E8
+2123+ 81E8 53 45 4E 44  CIPSOK:		DEFM "SEND " ; After a CIPSEND we need to skip over the Recv x bytes \n SEND OK ...
+2123+ 81EC 20
+2124+ 81ED
+2125+ 81ED 4F 4B        OK:		DEFM "OK"
+2126+ 81EF
+2127+ 81EF 0D 0A 00     CRLF:		DEFB 13,10,0
+2128+ 81F2
+2129+ 81F2 45 52 52 4F  ERROR:		DEFM "ERROR"
+2129+ 81F6 52
+2130+ 81F7 0D 0A 00     		DEFB 13,10,0
+2131+ 81FA
+2132+ 81FA
+2133+ 81FA              ;---------------------------------------------------------------------------------
+2134+ 81FA              ;Variables and buffers
+2135+ 81FA
+2136+ 81FA
+2137+ 81FA              ; One stack word from normal_start remains until finish; no edit pointers on SP.
+2138+ 81FA 21 B7 83     editor_reset           ld hl,Buffer1
+2139+ 81FD 22 40 6E                            ld (cursor),hl
+2140+ 8200 22 44 6E                            ld (window),hl
+2141+ 8203 22 42 6E                            ld (text_end),hl
+2142+ 8206 C9                                  ret
+2143+ 8207 2A 40 6E     editor_left            ld hl,(cursor)
+2144+ 820A 11 B7 83                            ld de,Buffer1
+2145+ 820D B7                                  or a
+2146+ 820E ED 52                               sbc hl,de
+2147+ 8210 C8                                  ret z
+2148+ 8211 2A 40 6E                            ld hl,(cursor)
+2149+ 8214 2B                                  dec hl
+2150+ 8215 22 40 6E                            ld (cursor),hl
+2151+ 8218 C9                                  ret
+2152+ 8219 2A 40 6E     editor_right           ld hl,(cursor)
+2153+ 821C ED 5B 42 6E                         ld de,(text_end)
+2154+ 8220 B7                                  or a
+2155+ 8221 ED 52                               sbc hl,de
+2156+ 8223 C8                                  ret z
+2157+ 8224 2A 40 6E                            ld hl,(cursor)
+2158+ 8227 23                                  inc hl
+2159+ 8228 22 40 6E                            ld (cursor),hl
+2160+ 822B C9                                  ret
+2161+ 822C F5           editor_insert          push af
+2162+ 822D 2A 42 6E                            ld hl,(text_end)
+2163+ 8230 11 B7 84                            ld de,Buffer1+256
+2164+ 8233 B7                                  or a
+2165+ 8234 ED 52                               sbc hl,de
+2166+ 8236 30 27                               jr nc,editor_full
+2167+ 8238 2A 42 6E                            ld hl,(text_end)
+2168+ 823B ED 5B 40 6E                         ld de,(cursor)
+2169+ 823F B7                                  or a
+2170+ 8240 ED 52                               sbc hl,de
+2171+ 8242 44                                  ld b,h
+2172+ 8243 4D                                  ld c,l
+2173+ 8244 2A 42 6E                            ld hl,(text_end)
+2174+ 8247 23                                  inc hl
+2175+ 8248 22 42 6E                            ld (text_end),hl
+2176+ 824B 2B                                  dec hl
+2177+ 824C 54                                  ld d,h
+2178+ 824D 5D                                  ld e,l
+2179+ 824E 2B                                  dec hl
+2180+ 824F 78                                  ld a,b
+2181+ 8250 B1                                  or c
+2182+ 8251 28 02                               jr z,editor_here
+2183+ 8253 ED B8                               lddr
+2184+ 8255 2A 40 6E     editor_here            ld hl,(cursor)
+2185+ 8258 F1                                  pop af
+2186+ 8259 77                                  ld (hl),a
+2187+ 825A 23                                  inc hl
+2188+ 825B 22 40 6E                            ld (cursor),hl
+2189+ 825E C9                                  ret
+2190+ 825F F1           editor_full            pop af
+2191+ 8260 C9                                  ret
+2192+ 8261 2A 40 6E     editor_backspace       ld hl,(cursor)
+2193+ 8264 11 B7 83                            ld de,Buffer1
+2194+ 8267 B7                                  or a
+2195+ 8268 ED 52                               sbc hl,de
+2196+ 826A C8                                  ret z
+2197+ 826B ED 5B 40 6E                         ld de,(cursor)
+2198+ 826F 1B                                  dec de
+2199+ 8270 ED 53 40 6E                         ld (cursor),de
+2200+ 8274 2A 42 6E                            ld hl,(text_end)
+2201+ 8277 2B                                  dec hl
+2202+ 8278 22 42 6E                            ld (text_end),hl
+2203+ 827B B7                                  or a
+2204+ 827C ED 52                               sbc hl,de
+2205+ 827E 44                                  ld b,h
+2206+ 827F 4D                                  ld c,l
+2207+ 8280 78                                  ld a,b
+2208+ 8281 B1                                  or c
+2209+ 8282 C8                                  ret z
+2210+ 8283 62                                  ld h,d
+2211+ 8284 6B                                  ld l,e
+2212+ 8285 23                                  inc hl
+2213+ 8286 ED B0                               ldir
+2214+ 8288 C9                                  ret
+2215+ 8289 3A 4A 6E     editor_move            ld a,(ui_visible)
+2216+ 828C B7                                  or a
+2217+ 828D CA C0 75                            jp z,read_key
+2218+ 8290 CD 70 83                            call ui_cursor_off
+2219+ 8293 2A 44 6E                            ld hl,(window)
+2220+ 8296 E5                                  push hl
+2221+ 8297 CD 26 83                            call ui_choose_window
+2222+ 829A D1                                  pop de
+2223+ 829B B7                                  or a
+2224+ 829C ED 52                               sbc hl,de
+2225+ 829E 20 10                               jr nz,editor_repaint
+2226+ 82A0 CD 53 83                            call ui_cursor_on
+2227+ 82A3 C3 C0 75                            jp read_key
+2228+ 82A6 3A 4A 6E     editor_refresh         ld a,(ui_visible)
+2229+ 82A9 B7                                  or a
+2230+ 82AA CA C0 75                            jp z,read_key
+2231+ 82AD CD 70 83                            call ui_cursor_off
+2232+ 82B0 CD F5 82     editor_repaint         call ui_redraw
+2233+ 82B3 C3 C0 75                            jp read_key
+2234+ 82B6
+2235+ 82B6              ; Keep ROM output cursor separate from the overlay; the screen backing is RAM.
+2236+ 82B6 3A 4A 6E     ui_hide                ld a,(ui_visible)
+2237+ 82B9 B7                                  or a
+2238+ 82BA C8                                  ret z
+2239+ 82BB E5                                  push hl
+2240+ 82BC D5                                  push de
+2241+ 82BD C5                                  push bc
+2242+ 82BE 37                                  scf
+2243+ 82BF CD 90 83                            call ui_transfer
+2244+ 82C2 2A 46 6E                            ld hl,(output_dfcc)
+2245+ 82C5 22 84 5C                            ld (23684),hl
+2246+ 82C8 2A 48 6E                            ld hl,(output_spos)
+2247+ 82CB 22 88 5C                            ld (23688),hl
+2248+ 82CE 3E 02                               ld a,2
+2249+ 82D0 CD 01 16                            call #1601
+2250+ 82D3 AF                                  xor a
+2251+ 82D4 32 4A 6E                            ld (ui_visible),a
+2252+ 82D7 C1                                  pop bc
+2253+ 82D8 D1                                  pop de
+2254+ 82D9 E1                                  pop hl
+2255+ 82DA C9                                  ret
+2256+ 82DB 3A 4A 6E     ui_show                ld a,(ui_visible)
+2257+ 82DE B7                                  or a
+2258+ 82DF C0                                  ret nz
+2259+ 82E0 2A 84 5C     ui_output_ready        ld hl,(23684)
+2260+ 82E3 22 46 6E                            ld (output_dfcc),hl
+2261+ 82E6 2A 88 5C                            ld hl,(23688)
+2262+ 82E9 22 48 6E                            ld (output_spos),hl
+2263+ 82EC B7                                  or a
+2264+ 82ED CD 90 83                            call ui_transfer
+2265+ 82F0 3E 01                               ld a,1
+2266+ 82F2 32 4A 6E                            ld (ui_visible),a
+2267+ 82F5 3E 01        ui_redraw              ld a,1
+2268+ 82F7 CD 01 16                            call #1601
+2269+ 82FA CD 26 83                            call ui_choose_window
+2270+ 82FD 22 44 6E                            ld (window),hl
+2271+ 8300 01 00 00                            ld bc,#0000
+2272+ 8303 CD 88 83                            call ui_at
+2273+ 8306 2A 44 6E                            ld hl,(window)
+2274+ 8309 3A 4F 6E                            ld a,(ui_capacity)
+2275+ 830C 47                                  ld b,a
+2276+ 830D C5           ui_paint               push bc
+2277+ 830E E5                                  push hl
+2278+ 830F ED 5B 42 6E                         ld de,(text_end)
+2279+ 8313 B7                                  or a
+2280+ 8314 ED 52                               sbc hl,de
+2281+ 8316 E1                                  pop hl
+2282+ 8317 3E 20                               ld a,32
+2283+ 8319 30 01                               jr nc,ui_space
+2284+ 831B 7E                                  ld a,(hl)
+2285+ 831C E5           ui_space               push hl
+2286+ 831D D7                                  rst 16
+2287+ 831E E1                                  pop hl
+2288+ 831F 23                                  inc hl
+2289+ 8320 C1                                  pop bc
+2290+ 8321 10 EA                               djnz ui_paint
+2291+ 8323 C3 53 83                            jp ui_cursor_on
+2292+ 8326 2A 40 6E     ui_choose_window       ld hl,(cursor)
+2293+ 8329 ED 5B 44 6E                         ld de,(window)
+2294+ 832D B7                                  or a
+2295+ 832E ED 52                               sbc hl,de
+2296+ 8330 38 0F                               jr c,ui_window_left
+2297+ 8332 7C                                  ld a,h
+2298+ 8333 B7                                  or a
+2299+ 8334 20 0F                               jr nz,ui_window_right
+2300+ 8336 3A 4F 6E                            ld a,(ui_capacity)
+2301+ 8339 3D                                  dec a
+2302+ 833A BD                                  cp l
+2303+ 833B 38 08                               jr c,ui_window_right
+2304+ 833D 2A 44 6E                            ld hl,(window)
+2305+ 8340 C9                                  ret
+2306+ 8341 2A 40 6E     ui_window_left         ld hl,(cursor)
+2307+ 8344 C9                                  ret
+2308+ 8345 2A 40 6E     ui_window_right        ld hl,(cursor)
+2309+ 8348 3A 4F 6E                            ld a,(ui_capacity)
+2310+ 834B 3D                                  dec a
+2311+ 834C 5F                                  ld e,a
+2312+ 834D 16 00                               ld d,0
+2313+ 834F B7                                  or a
+2314+ 8350 ED 52                               sbc hl,de
+2315+ 8352 C9                                  ret
+2316+ 8353              ; ROM draws inverse space over glyph, so cursor follows font and active width.
+2317+ 8353 2A 40 6E     ui_cursor_on           ld hl,(cursor)
+2318+ 8356 ED 5B 44 6E                         ld de,(window)
+2319+ 835A B7                                  or a
+2320+ 835B ED 52                               sbc hl,de
+2321+ 835D 3A 4E 6E                            ld a,(ui_columns)
+2322+ 8360 4F                                  ld c,a
+2323+ 8361 7D                                  ld a,l
+2324+ 8362 B9                                  cp c
+2325+ 8363 06 00                               ld b,0
+2326+ 8365 38 02                               jr c,ui_cursor_row
+2327+ 8367 91                                  sub c
+2328+ 8368 04                                  inc b
+2329+ 8369 4F           ui_cursor_row          ld c,a
+2330+ 836A ED 43 4B 6E                         ld (cursor_at),bc
+2331+ 836E 18 04                               jr ui_cursor_draw
+2332+ 8370 ED 4B 4B 6E  ui_cursor_off          ld bc,(cursor_at)
+2333+ 8374 CD 88 83     ui_cursor_draw         call ui_at
+2334+ 8377 3A 91 5C                            ld a,(23697)
+2335+ 837A F5                                  push af
+2336+ 837B F6 05                               or 5
+2337+ 837D 32 91 5C                            ld (23697),a
+2338+ 8380 3E 20                               ld a,32
+2339+ 8382 D7                                  rst 16
+2340+ 8383 F1                                  pop af
+2341+ 8384 32 91 5C                            ld (23697),a
+2342+ 8387 C9                                  ret
+2343+ 8388 3E 16        ui_at                  ld a,22
+2344+ 838A D7                                  rst 16
+2345+ 838B 78                                  ld a,b
+2346+ 838C D7                                  rst 16
+2347+ 838D 79                                  ld a,c
+2348+ 838E D7                                  rst 16
+2349+ 838F C9                                  ret
+2350+ 8390              ; CY=0 save screen -> scratch; CY=1 restore scratch -> screen.
+2351+ 8390              ; LDIR/INC/DJNZ preserve CY. Eight 64-byte pixel slices, then 64 attributes.
+2352+ 8390 21 C0 50     ui_transfer            ld hl,#50C0
+2353+ 8393 11 00 6C                            ld de,ui_backup
+2354+ 8396 06 08                               ld b,8
+2355+ 8398 C5           ui_slice               push bc
+2356+ 8399 E5                                  push hl
+2357+ 839A 01 40 00                            ld bc,64
+2358+ 839D CD AB 83                            call ui_copy
+2359+ 83A0 E1                                  pop hl
+2360+ 83A1 24                                  inc h
+2361+ 83A2 C1                                  pop bc
+2362+ 83A3 10 F3                               djnz ui_slice
+2363+ 83A5 21 C0 5A                            ld hl,#5AC0
+2364+ 83A8 01 40 00                            ld bc,64
+2365+ 83AB 30 05        ui_copy                jr nc,ui_forward
+2366+ 83AD EB                                  ex de,hl
+2367+ 83AE ED B0                               ldir
+2368+ 83B0 EB                                  ex de,hl
+2369+ 83B1 C9                                  ret
+2370+ 83B2 ED B0        ui_forward             ldir
+2371+ 83B4 C9                                  ret
+2372+ 83B5              cursor                 equ ui_backup+576
+2373+ 83B5              text_end               equ ui_backup+578
+2374+ 83B5              window                 equ ui_backup+580
+2375+ 83B5              output_dfcc            equ ui_backup+582
+2376+ 83B5              output_spos            equ ui_backup+584
+2377+ 83B5              ui_visible             equ ui_backup+586
+2378+ 83B5              cursor_at              equ ui_backup+587
+2379+ 83B5              history_confirm        equ ui_backup+589
+2380+ 83B5              ui_columns             equ ui_backup+590
+2381+ 83B5              ui_capacity            equ ui_backup+591
+2382+ 83B5              ui_backup              equ #6C00
+2383+ 83B5                                     ASSERT ui_backup+576 <= Buffer4
+2384+ 83B5                                     ASSERT ui_capacity < Buffer4
+2385+ 83B5                                     ASSERT ui_backup >= #6400
+2386+ 83B5
+2387+ 83B5 00           CURBAUD:	DEFB 0			;start at 115200
+2388+ 83B6 00           		DEFB 0			;Zero for easy load at 16bits
+2389+ 83B7
+2390+ 83B7 00 00 00...  Buffer1:	DEFS 256		; SEND BUFFER
+2391+ 84B7 0D 0A        		defb 13,10
+2392+ 84B9 0A           Endbuffers:	DEFB 10			; A default LF to finish
+2393+ 84BA
+2394+ 84BA 00 00 00...  Buffer2:	DEFS 1024		; RECV BUFFER (in CIPSEND/IPD mode) May need to increase
+2395+ 88BA BA 84        Buf2Pos:	DEFW Buffer2		; Where are we in Buffer2
+2396+ 88BC
+2397+ 88BC              ;MB03
+2398+ 88BC 00 00 00...  Buffer3		DEFS 256		; special buffer for a new command
+2399+ 89BC              Buffer4 equ #7000		; external history, not stored in binary
+2400+ 89BC              history_size equ 1024
+2401+ 89BC               ASSERT Buffer4+history_size <= start_address
+2402+ 89BC               ASSERT Buffer4 >= #6400	; setup stack ends at #63E0
+2403+ 89BC              ;end MB03
+2404+ 89BC
+2405+ 89BC 00           FLAGS:		DEFB 0			; IX+0 First of the IX accessed FLAGS When bit set : 0=CIPSEND MODE, 1=ANSI, 2=Looking for ESC, 3=BUFFER2
+2406+ 89BD              					; 6 = debug command print mode, 7=leading zero suppression in number prints.
+2407+ 89BD 00 00        IPDSIZE:	DEFW 0			; IX+1,2
+2408+ 89BF 00 00 00...  GOTNUM:		DEFS 10			; Space to decode
+2409+ 89C9 00           ESCPARAMS:	DEFB 0			; IX+13 count of number of ESC paramters
+2410+ 89CA 00 00 00...  		DEFS 20			; Space for upto 20
+2411+ 89DE 00           ESCCMD:		DEFB 0			; IX+33 The actual ANSI command
+2412+ 89DF
+2413+ 89DF
+2414+ 89DF 41 54 2B 43  CIPSEND:	DEFM "AT+CIPSEND="
+2414+ 89E3 49 50 53 45
+2414+ 89E7 4E 44 3D
+2415+ 89EA 00 00 00...  STRINGNUM:	DEFS 7			;Space to create  65536\CR\lf
+2416+ 89F1 00           		DEFB 0
+2417+ 89F2
+2418+ 89F2              total_len	equ	$-start_address
+2419+ 89F2
+2420+ 89F2              ;		DEFC Buffer1 = 09000h	;36864
+2421+ 89F2              ;		DEFC Buffer2 = 09100h	;37120
+2422+ 89F2              ;		DEFC Endbuffers = 09200h ;40960
+2423+ 89F2
+2424+ 89F2              last:
+2425+ 89F2              ;savebin "uart",start1,.last-start1
+2426+ 89F2              ;SAVESNA "uart.sna",start1
+2427+ 89F2              endramcode
+2428+ 89F2
+2429+ 89F2 ~            /*
+2430+ 89F2 ~            ;-------------------------------
+2431+ 89F2 ~            CODE	=	#AF
+2432+ 89F2 ~            USR		=	#C0
+2433+ 89F2 ~            LOAD	=	#EF
+2434+ 89F2 ~            CLEAR	=	#FD
+2435+ 89F2 ~            RANDOMIZE =	#F9
+2436+ 89F2 ~
+2437+ 89F2 ~            	org	#5C00		;; Basic loader
+2438+ 89F2 ~            baszac	db	0,1			;; Line number
+2439+ 89F2 ~            	dw	linlen			;; Line length
+2440+ 89F2 ~            linzac
+2441+ 89F2 ~            	db	CLEAR,'8',#0E,0,0
+2442+ 89F2 ~            	dw	ramcode-1
+2443+ 89F2 ~            	db	0,':'
+2444+ 89F2 ~            	db	LOAD,'""',CODE,':'
+2445+ 89F2 ~            	db	RANDOMIZE,USR,'8',#0E,0,0
+2446+ 89F2 ~            	dw	ramcode
+2447+ 89F2 ~            	db	0,#0D
+2448+ 89F2 ~            linlen	=	$-linzac
+2449+ 89F2 ~            baslen	=	$-baszac
+2450+ 89F2 ~
+2451+ 89F2 ~
+2452+ 89F2 ~            	savesna  "uart.sna",ramcode
+2453+ 89F2 ~            	EMPTYTAP "uart.tap"
+2454+ 89F2 ~            	SAVETAP  "uart.tap" , BASIC, uart , baszac,baslen,1
+2455+ 89F2 ~            	SAVETAP  "uart.tap",CODE,"uart",maincode,endramcode-maincode,maincode
+2456+ 89F2 ~            */
+# file closed: terminal11_main.asm
+   5  89F2               SAVEBIN "terminal11_next.bin",start_address,total_len
+   6  89F2               ENDMODULE
+   7  89F2               ; Standalone BASIC loader. Code binary above excludes this loader.
+   8  89F2               ORG #5C00
+   9  5C00              basic_start:
+  10  5C00 00 01         DB 0,1
+  11  5C02 20 00         DW basic_end-basic_line
+  12  5C04              basic_line:
+  13  5C04 FD 32 37 36   DB #FD,"27647",#0E,0,0
+  13  5C08 34 37 0E 00
+  13  5C0C 00
+  14  5C0D FF 6B         DW 27647
+  15  5C0F 00 3A EF 22   DB 0,':',#EF,'"','"',#AF,':',#F9,#C0,"30000",#0E,0,0
+  15  5C13 22 AF 3A F9
+  15  5C17 C0 33 30 30
+  15  5C1B 30 30 0E 00
+  15  5C1F 00
+  16  5C20 30 75         DW 30000
+  17  5C22 00 0D         DB 0,13
+  18  5C24              basic_end:
+  19  5C24               EMPTYTAP "Terminal11_next.tap"
+  20  5C24               SAVETAP "Terminal11_next.tap",BASIC,"terminal11",basic_start,basic_end-basic_start,1
+  21  5C24               SAVETAP "Terminal11_next.tap",CODE,"terminal11",v1.start_address,v1.total_len,v1.start_address
+# file closed: terminal11_next.asm

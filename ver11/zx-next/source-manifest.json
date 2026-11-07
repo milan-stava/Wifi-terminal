@@ -1,0 +1,22 @@
+﻿[
+    {
+        "sha256":  "B39C9792E75A7B84A7B06278055D0ECA5B4CB7F493FB4B9FD94B7381A77E92B5",
+        "path":  "source\\terminal11_main.asm"
+    },
+    {
+        "sha256":  "B6D77070CC80E58F70E5361DD82DE4E640F8529E8725E2F011125F5496E86214",
+        "path":  "source\\terminal11_next.asm"
+    },
+    {
+        "sha256":  "C79BA894594D72FB7C39BDEC09CD6EBD2445FE896A84970DD3D3D69B93689941",
+        "path":  "source\\terminal11_next.bin"
+    },
+    {
+        "sha256":  "33F2711276EA1012CCA2F4D202EE22E0DA2FCC766E95AC55733448076CE6308B",
+        "path":  "source\\terminal11_next_setup.asm"
+    },
+    {
+        "sha256":  "C79BA894594D72FB7C39BDEC09CD6EBD2445FE896A84970DD3D3D69B93689941",
+        "path":  "source\\terminal11_next_setup.bin"
+    }
+]

@@ -1,0 +1,57 @@
+Terminal for wifi modules in MB03+ and eLeMeNt ZX
+
+
+
+Update: 24.02.2026
+Version: 1.0
+Download: ver. 1.0
+
+
+
+What's new in version 1.0?
+
+Two main reasons lead to new version of this beautiful terminal. First, due to changes in MB03+ cores later than 25.01.2025, old version for MB crashed at the start. So I needed to rework the terminal slightly. Second, there was a mess in previous versions. New version 1.0 is clearly named "1.0" to split itself from its past versions. I also removed ZXNext code which was still present, so now the terminal is tinier.
+
+
+
+
+
+
+Update: 26.01.2024
+Version: 0.3
+Download: ver.0.3_22.f
+
+
+
+What's new in version 0.3?
+
+Since eLeMeNt ZX was fitted with its own Wifi module option, and MB03+ has its own Wifi module also, there emerged an urgent need for the Wifi software to distinguish clearly between those two and to work flawleslly in whatever Wifi presence in both devices. So if you have Wifi module in eLeMeNt ZX only, or in MB03+ only or even both Wifis are present in eLeMeNt ZX and MB03+, the Wifi software should work perfectly now.
+
+The only novelty in terminal (uart) 0.3 is, that it has been adapted to cope with these new conditions. For sure, there are 2 versions of it, one for eLeMeNt ZX Wifi module, and other for MB03+ Wifi module.
+
+
+
+
+
+
+Release: 2020
+Autor: Tim Gilberts & other authors
+Version: 0.2
+Download: ver.0.2_22f
+
+
+ 
+
+
+Dear Wifi users,
+
+this is the first program for Wifi module ESP-01 that emerged for our beloved MB03+. It is a simple, yet powerful enough terminal, that enables you all basic work with your wifi module. I used it a lot for tweaking and teaching how things and commands work.
+
+It is my everyday piece of software, so I recommend you very much.
+
+LMN and me were doing some adaptation to it. LMN did extra speed settings (press EDIT to change speed). I remade the keyboard routine and added cursor up key which invokes command you entered as last. Plus I made work direct data sending, which I used for experiments with TNFS servers, which Spectranet is running on.
+
+This program originated on ZX Next platform, so many acknowledgements to Tim Gilberts and co-authors.
+
+
+Hood, 21.10.2022

@@ -1,0 +1,24 @@
+﻿{
+    "outputs":  [
+                    {
+                        "sha256":  "A17CBE3E430EED29C26255D0863AD5944741DC68211B701B7DFCFECCC7774D93",
+                        "source":  "Terminal11_next.tap",
+                        "file":  "Terminal11_next.tap"
+                    },
+                    {
+                        "sha256":  "C79BA894594D72FB7C39BDEC09CD6EBD2445FE896A84970DD3D3D69B93689941",
+                        "source":  "terminal11_next.bin",
+                        "file":  "terminal11_next.bin"
+                    },
+                    {
+                        "sha256":  "C79BA894594D72FB7C39BDEC09CD6EBD2445FE896A84970DD3D3D69B93689941",
+                        "source":  "terminal11_next_setup.bin",
+                        "file":  "terminal11_next_setup.bin"
+                    }
+                ],
+    "directory":  "source",
+    "targets":  [
+                    "terminal11_next",
+                    "terminal11_next_setup"
+                ]
+}
