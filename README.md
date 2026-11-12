@@ -45,9 +45,7 @@ Direct, version-specific links suitable for use on other websites:
 | EL/MB standalone TAP | [Terminal11_el_mb.tap](https://raw.githubusercontent.com/milan-stava/Wifi-terminal/v1.1/ver11/el-mb/runable/Terminal11_el_mb.tap) | 5411 |
 | ZX Next standalone TAP | [Terminal11_next.tap](https://raw.githubusercontent.com/milan-stava/Wifi-terminal/v1.1/ver11/zx-next/runable/Terminal11_next.tap) | 5400 |
 | EL/MB standalone BIN | [terminal11_el_mb.bin](https://raw.githubusercontent.com/milan-stava/Wifi-terminal/v1.1/ver11/el-mb/runable/terminal11_el_mb.bin) | 5325 |
-| ZX Next standalone BIN | [terminal11_next.bin](https://raw.githubusercontent.com/milan-stava/Wifi-terminal/v1.1/ver11/zx-next/runable/terminal11_next.bin) | 5314 |
 | EL/MB setup component | [terminal11_el_mb_setup.bin](https://raw.githubusercontent.com/milan-stava/Wifi-terminal/v1.1/ver11/el-mb/runable/terminal11_el_mb_setup.bin) | 5256 |
-| ZX Next setup component | [terminal11_next_setup.bin](https://raw.githubusercontent.com/milan-stava/Wifi-terminal/v1.1/ver11/zx-next/runable/terminal11_next_setup.bin) | 5314 |
 
 [Complete v1.1 package ZIP (sources and binaries)](https://github.com/milan-stava/Wifi-terminal/archive/refs/tags/v1.1.zip).
 
